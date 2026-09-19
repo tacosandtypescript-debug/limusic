@@ -115,7 +115,22 @@ if (q.has("cardop") || (preset && "opacity" in preset)) {
 const $ = (elId) => document.getElementById(elId);
 const el = { art: $("art"), cover: $("cover"), ring: $("ring"), title: $("title"),
              titleText: $("titleText"), artist: $("artist"), artistText: $("artistText"),
-             album: $("album"), fill: $("fill"), elapsed: $("elapsed"), remaining: $("remaining") };
+             album: $("album"), byline: $("byline"),
+             fill: $("fill"), elapsed: $("elapsed"), remaining: $("remaining") };
+
+/**
+ * The queue entry's `from` label, as something worth reading.
+ *
+ * `twitch:<login>` is what the Twitch sidecar writes when a viewer spends points or types the
+ * command. Anything else is the user's own — a playlist name, a folder — and is shown as it is
+ * rather than guessed at.
+ */
+function byline(raw) {
+  if (!raw) return "";
+  const s = String(raw);
+  const twitch = /^twitch:(.+)$/i.exec(s);
+  return twitch ? "@" + twitch[1] : s;
+}
 
 /* Both endpoints live under the same token as the page, so they are derived from its own path
    rather than written as absolute "/state" — which would 404 and leave the overlay blank. */
@@ -347,7 +362,10 @@ const DEMO = {
   position: Number(q.get("dpos")) || 78,
   // Preview-only, like everything else on this object: the paused look is a state someone has to be
   // able to *see* to review, and there is no way to reach it from the URL otherwise.
-  paused: q.get("dpaused") === "1"
+  paused: q.get("dpaused") === "1",
+    // Same reasoning. A requested song is a state, and without this the byline could only be
+    // looked at by connecting a channel and spending points on it.
+    queuedFrom: q.get("dfrom") || null
 };
 const DEMO_ART = "data:image/svg+xml;utf8," + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">' +
@@ -381,6 +399,24 @@ if (q.get("demo") === "1") {
     if (first) { shownId = t.videoId; paint(t); }
     else if (t.videoId !== shownId) { shownId = t.videoId; swapTo(t); }
   });
+}
+
+/* Preview-only: change the track after `dswap` milliseconds.
+ *
+ * A track change is the one animation that cannot be seen without provoking one, and provoking it by
+ * hand means clicking a window that has to be open, focused, positioned and scaled correctly — which
+ * failed five times in a row while this was being written. A delay from the URL makes the whole
+ * sequence reproducible, and it drives the real path: the same `swapTo` the preview channel and the
+ * transport use, not a simplified copy of it. */
+const swapAfter = Number(q.get("dswap")) || 0;
+if (swapAfter > 0 && q.get("demo") === "1") {
+  setTimeout(() => {
+    demoAt = (demoAt + 1) % DEMO_SET.length;
+    const next = DEMO_SET[demoAt];
+    previewTrack = next;
+    shownId = next.videoId;
+    swapTo(next);
+  }, swapAfter);
 }
 
 function fmt(s) {
@@ -496,6 +532,21 @@ function paint(track) {
   el.titleText.textContent = track.title || "—";
   el.artistText.textContent = track.artists || "";
   el.album.textContent = track.album || "";
+  // Who asked for it, when somebody did — the payoff of the request path, which until now wrote a
+  // label into the queue that nothing on screen ever read.
+  //
+  // Two parts so the name can carry the accent while the words around it stay furniture, and
+  // `hidden` rather than empty text: an empty span still takes the eyebrow's flex gap, so the
+  // equaliser bars would sit eight pixels further from the words on every song nobody requested.
+  const asked = byline(track.queuedFrom);
+  el.byline.hidden = !asked;
+  el.byline.textContent = "";
+  if (asked) {
+    el.byline.append("pedido por ");
+    const who = document.createElement("b");
+    who.textContent = asked;
+    el.byline.append(who);
+  }
   setCover(track.thumbnail || (q.get("demo") === "1" ? DEMO_ART : ""));
   // Measured after the text is in place and before the fade-in finishes, so the marquee is already
   // set up when the title becomes visible.

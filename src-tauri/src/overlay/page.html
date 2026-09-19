@@ -70,6 +70,10 @@
         <p class="eyebrow">
           <span>Ahora suena</span>
           <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <!-- Who asked for this one, when somebody did. Hidden while empty — an empty span still
+               takes the flex gap, so the bars would sit further from the words on every song nobody
+               requested. The queue has carried the label since the Twitch work; nothing read it. -->
+          <span class="byline" id="byline" hidden></span>
         </p>
         <h1 class="title" id="title"><span id="titleText">—</span></h1>
         <p class="artist" id="artist"><span id="artistText"></span></p>

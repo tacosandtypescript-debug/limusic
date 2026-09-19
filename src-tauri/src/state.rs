@@ -1955,6 +1955,13 @@ impl AppState {
             // YouTube's own `musicVideoType` says this track is a video upload, not the generated
             // audio track, which is what the player view's music-video mode gates on (plan 031).
             "isVideo": item.is_video,
+            // Who asked for it, when it was asked for rather than chosen.
+            //
+            // The queue has carried this since the Twitch work — `twitch:<login>` is written by
+            // `apply_twitch` — and until now nothing read it. The label existed, the viewer who
+            // earned it never saw it, and a request stream had no way to show that requests were
+            // working at all. `null` for anything the user queued themselves.
+            "queuedFrom": item.queued_from,
         })
     }
 
@@ -1962,12 +1969,20 @@ impl AppState {
     /// player (a second webview, created long after the track started) and the main window on a
     /// cold start both have to ask once instead of guessing.
     pub async fn playback_snapshot(&self) -> serde_json::Value {
-        let (duration, item) = {
+        let (duration, item, next) = {
             let q = self.queue.lock().await;
-            (q.duration, q.items.get(q.current).cloned())
+            (
+                q.duration,
+                q.items.get(q.current).cloned(),
+                // What plays after this one. Sent whole rather than as a title, so a surface can
+                // show whatever it has room for — and `None` at the end of a queue, which is a
+                // different thing from a queue that has not been built yet.
+                q.items.get(q.current + 1).cloned(),
+            )
         };
         serde_json::json!({
             "now": item.as_ref().map(|i| Self::now_playing_json(i, "current")),
+            "next": next.as_ref().map(|i| Self::now_playing_json(i, "next")),
             "paused": !self.is_playing.load(Ordering::Relaxed),
             "position": self.current_position(),
             "duration": duration,

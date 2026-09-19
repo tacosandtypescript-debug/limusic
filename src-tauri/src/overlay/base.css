@@ -323,6 +323,22 @@ body.paused .art img { filter: saturate(0.4) brightness(0.84); }
   margin: 2px 0 0; font-size: var(--album); font-weight: 450;
   color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* Who asked for this one, when somebody did.
+ *
+ * In the eyebrow, which is the only place in every design with room for it without moving anything —
+ * the title, the bar and the transport all sit in fixed compositions and a new line under them would
+ * push the transport off the bottom of the two 430px cards.
+ *
+ * It is hidden while empty, and `hidden` rather than an empty string: an empty span still takes the
+ * flex gap, so the EQ bars would sit 8px further from the words on every song nobody requested. */
+.eyebrow .byline {
+  color: var(--ink-3); font-weight: 600; letter-spacing: 0.04em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.eyebrow .byline::before { content: "·"; margin-right: 6px; opacity: 0.7; }
+/* The name is the part somebody earned; the words around it are furniture. */
+.eyebrow .byline b { color: var(--accent); font-weight: 700; }
 /* Starts after a pause, drifts slowly, rests at both ends. `alternate` is what gives the rest at
    the far end without a second keyframe; the duration is set per title from how far it has to
    travel, so a slightly-too-long title and a very long one scroll at the same speed. */
