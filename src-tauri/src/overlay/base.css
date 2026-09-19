@@ -238,7 +238,15 @@ body.boot #now { animation: boot-in var(--dur-swap) var(--ease-out) both; }
 }
 
 /* ── Artwork ────────────────────────────────────────────────────────────────────────────────── */
-.art { position: relative; flex: 0 0 auto; width: var(--art); height: var(--art); }
+.art {
+  position: relative; flex: 0 0 auto; width: var(--art); height: var(--art);
+  /* The slot the outgoing cover is held in during a change. `clip-path` clips a layer and shows what
+     is behind it, so without something underneath, a wipe reveals the scene instead of the previous
+     artwork — a white square in the preview and the gameplay on stream. The script sets the image
+     and clears it again; these two only say how it sits in the box, which no design needs to vary. */
+  background-size: cover;
+  background-position: center;
+}
 
 /* A pause you can see from across the room.
 

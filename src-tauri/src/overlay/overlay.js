@@ -586,6 +586,19 @@ let swapping = false;
 async function swapTo(track) {
   if (swapping) { paint(track); return; }   // two changes inside one sequence: update, don't queue
   swapping = true;
+  // Pin the cover that is on screen right now, so the incoming artwork has something to be revealed
+  // *against*.
+  //
+  // This is the white square. `clip-path` clips a layer and shows whatever is behind it — and behind
+  // the artwork there was nothing at all, so every track change opened a hole in the cover and let
+  // the scene through. In the preview that hole is white, because the window behind it is; on stream
+  // it is the gameplay, flashing inside the album art. A mixer's wipe has two sources, one leaving
+  // as the other arrives. This one had a single layer and a pair of scissors.
+  //
+  // So the outgoing cover is held underneath for the length of the sequence and the edge reveals it
+  // instead. It is one background-image, set here and cleared at the end, and only while a swap is
+  // in flight — the cost is a decoded image that is already in memory.
+  if (el.cover.src) el.art.style.backgroundImage = `url("${el.cover.src}")`;
   body.classList.add("swap-out");
   await wait(T.exit);
   paint(track);
@@ -594,6 +607,8 @@ async function swapTo(track) {
   body.classList.add("swap-in");
   await wait(T.enter);
   body.classList.remove("swap-in");
+  // The new cover is the one on screen now; the old one is only in the way of the next wipe.
+  el.art.style.backgroundImage = "";
   swapping = false;
 }
 
