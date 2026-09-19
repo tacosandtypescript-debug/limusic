@@ -99,8 +99,55 @@ body[data-design="sleeve-tall"] .art img { border-radius: 8px; }
 
 body[data-design="sleeve-tall"] .eyebrow {
   justify-content: center;
-  margin-top: 20px;
+  margin-top: 12px;
 }
 
-body[data-design="sleeve-tall"] .controls { justify-content: center; }
+/* ── Squaring the stack ────────────────────────────────────────────────────────────────────────
+   The composition declared 26px of padding and was not honouring it. Measured on a 380×430 render:
+   the cover sat 11px from the top edge where 26 was asked for, and the transport reached y=410
+   where the padding puts the floor at 404 — six pixels past it. At this size that reads as the
+   transport hanging off the bottom of its own card.
+
+   The room comes out of the margins, not out of the artwork. The cover is what this design *is* —
+   "the same object, stood up" — and shrinking 190px would trade the idea for the spacing. Eighteen
+   pixels of margin is nothing anybody can point at; the cover losing a tenth of its height is.
+
+   Scoped to this overlay and measured against it, so nothing here moves overlay 1 or the other four. */
+body[data-design="sleeve-tall"] .progress { margin-top: 9px; }
+body[data-design="sleeve-tall"] .times { margin-top: 6px; }
+
+/* ── 1. A pass of light across the artwork ─────────────────────────────────────────────────────
+   The same gesture as overlay 1, and it belongs here more than it does there: this cover is 190px
+   against that one's 112, so there is nearly twice the surface for the light to cross.
+
+   125° rather than the horizontal's 105°, and the angle is the point of doing it separately. Stood
+   up, the light should read as falling from above onto an object on a shelf; laid flat, it reads as
+   a glance across a record held in the hand. The same animation at the same angle would have made
+   the two overlays the same picture at two sizes, which is what this design is explicitly not. */
+@keyframes sleeve-tall-sheen {
+  0%   { transform: translateX(-130%); opacity: 0; }
+  12%  { opacity: 1; }
+  100% { transform: translateX(130%); opacity: 0; }
+}
+body[data-design="sleeve-tall"] .art::after {
+  content: "";
+  position: absolute; inset: 0; border-radius: 8px;
+  pointer-events: none;
+  background: linear-gradient(125deg,
+    transparent 32%,
+    oklch(1 0 0 / 30%) 50%,
+    transparent 68%);
+  opacity: 0;
+}
+body[data-design="sleeve-tall"].swap-in .art::after {
+  animation: sleeve-tall-sheen var(--dur-art) var(--ease-out) var(--art-lead) both;
+}
+
+/* ── 2. Pausing settles the artwork ────────────────────────────────────────────────────────────
+   The desaturation says "no colour"; this says "stopped". Deliberately at the edge of visible: the
+   artwork is desaturating beside it, and two loud effects at the same instant make a pause look
+   like a fault rather than a state. */
+body[data-design="sleeve-tall"].paused .art img { scale: 0.985; }
+
+body[data-design="sleeve-tall"] .controls { justify-content: center; margin-top: 8px; }
 
