@@ -264,6 +264,29 @@ body.paused .art img { filter: saturate(0.4) brightness(0.84); }
 .art .fallback svg { width: 36%; height: 36%; }
 .art.has-art .fallback { display: none; }
 
+/* ── The sweep ────────────────────────────────────────────────────────────────────────────────
+   A band of light that travels across the whole card on a track change. Empty and invisible until a
+   design fills it in, which is why four of the six overlays never show it.
+
+   An element rather than a pseudo-element, and that is the whole reason it exists. `#now` has two
+   pseudo-elements and both are the ambilight; `.art` has one free, but it sits inside an element
+   carrying a -2.5deg tilt, so a card-sized rectangle drawn there would rotate with the cover and
+   overhang the corners.
+
+   `overflow: hidden` with `border-radius: inherit` is what keeps the band inside the card. Without
+   it the light would spill onto the scene behind — on stream, a bright smear across the gameplay,
+   which is the one thing an overlay must never do. */
+.sweep {
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  /* Above the artwork and above the words: light falls on the object, not behind it. The ambilight
+     is at -1, so this only has to beat the flow content. */
+  z-index: 2;
+}
+.sweep::after { content: ""; position: absolute; inset: 0; background: none; opacity: 0; }
+
 /* ── Text ───────────────────────────────────────────────────────────────────────────────────── */
 /* `max-width: 100%` is load-bearing on the two stacked designs, where `#now` is a column with
    `align-items: center`: a flex item's cross size is its max-content size, so a long `nowrap` title

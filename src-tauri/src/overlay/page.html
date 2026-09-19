@@ -109,7 +109,12 @@
           </button>
         </div>
       </div>
-    </main>
+      <!-- A light that crosses the whole card. Empty, and inert until a design gives it a
+         gradient and an animation: four of the six overlays never do. It is an element rather
+         than a pseudo-element because both of `#now`'s are the ambilight, and `.art`'s would
+         inherit that element's tilt. -->
+    <span class="sweep" aria-hidden="true"></span>
+  </main>
   </div>
 
 <script src="overlay.js"></script>

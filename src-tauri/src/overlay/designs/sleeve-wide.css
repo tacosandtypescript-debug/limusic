@@ -104,66 +104,37 @@ body[data-design="sleeve-wide"] .art img { border-radius: 6px; }
    scrubber dot.
    ═══════════════════════════════════════════════════════════════════════════════════════════════ */
 
-/* ── 1. A pass of light across the artwork, as it lands ────────────────────────────────────────
-   The one gesture this design had earned and did not have. Sleeve's whole idea is a record in its
-   cover, set down at an angle — and this is what happens to an object like that when you pick it up.
+/* ── 1. A pass of light across the whole card ─────────────────────────────────────────────────
+   Across the **card**, not across the cover. The first version swept only the artwork, and seen on
+   screen that is not light — it is a sticker being lit. Everything around it holds still while one
+   part of the object brightens, and the eye reads the bright thing as the thing that moved. Light
+   falls on the object, and the object here is the card.
 
-   On `.art::after`, which was free: the artwork carries no pseudo-element of its own, and putting the
-   light on the container means it inherits the -2.5deg tilt without being told about it.
+   So the band crosses all 620 pixels of it — over the artwork and over the words — and `.sweep`
+   clips it to the card's own radius. Without that clip the light would spill onto the gameplay
+   behind, which on stream is the one thing an overlay must never do.
 
-   Delayed past the artwork's own arrival so it reads as light catching it *after* it lands, rather
-   than the cover sliding in already lit. One shot, so it costs nothing at rest. */
-@keyframes sleeve-art-sheen {
-  0%   { transform: translateX(-130%); opacity: 0; }
-  12%  { opacity: 1; }
-  100% { transform: translateX(130%); opacity: 0; }
+   105 degrees, and the angle is why the two sleeve overlays do this separately instead of sharing
+   one rule: stood up, the light should read as falling from above onto something on a shelf; laid
+   flat, as a glance across a record held in the hand. The same animation at the same angle would
+   make the two the same picture at two sizes, which is what this design is explicitly not.
+
+   Wide and faint — 50% of the card at 15% white. The first attempt was a narrow bright stripe, and that
+   reads as a sparkle travelling. A pass of light is a wash, not a highlight. */
+@keyframes sleeve-card-sheen {
+  from { transform: translateX(-110%); }
+  to   { transform: translateX(110%); }
 }
-body[data-design="sleeve-wide"] .art::after {
-  content: "";
-  position: absolute; inset: 0; border-radius: 6px;
-  pointer-events: none;
-  /* Wide and faint on purpose. The first version was a 32% band at 34% white, which read as
-     a sparkle travelling across the cover — the gesture is a light *passing*, not a highlight
-     arriving, and a narrow bright stripe is the difference between the two. This one is
-     54% wide at 15% peak: the same travel with nothing to catch the eye. */
+body[data-design="sleeve-wide"] .sweep::after {
   background: linear-gradient(105deg,
-    transparent 23%,
+    transparent 25%,
     oklch(1 0 0 / 15%) 50%,
-    transparent 77%);
-  opacity: 0;
+    transparent 75%);
+  opacity: 1;
 }
-/* Both figures are tokens, and not only because `motion_is_defined_once_in_tokens` says so: they are
-   also the right ones. The light lasts as long as the artwork's own arrival, and it is delayed by
-   `--art-lead` — the same head start the words get — so the light catches the cover at the moment the
-   text starts to arrive, which is what makes the two read as one event. */
-body[data-design="sleeve-wide"].swap-in .art::after {
-  animation: sleeve-art-sheen var(--dur-art) var(--ease-out) var(--art-lead) both;
+body[data-design="sleeve-wide"].swap-in .sweep::after {
+  animation: sleeve-card-sheen var(--dur-art) var(--ease-out) var(--art-lead) both;
 }
-
-/* ── 2. The ambilight — TRIED, MEASURED, REMOVED ───────────────────────────────────────────────
-
-   The idea was to make the light behind the artwork breathe on the same cycle the artwork does, so
-   the card reads as one lit object rather than a photograph moving inside a lamp that was switched
-   on and left. It does not work, and the reason is worth writing down instead of leaving it to be
-   rediscovered.
-
-   **By opacity it is impossible.** The ambilight is two layers whose opacity is exactly what
-   `setGlow()` cross-fades on every track change, and an animation beats a transition — animating the
-   opacity here silently kills that cross-fade, and the layers snap again.
-
-   **By scale it is invisible.** Tried and measured: both layers scaled over an eighteen-second
-   cycle, sampling the card at opposite phases. At 1.025 the brightness moved 0.071 out of 255; at
-   1.08 — deliberately absurd, purely to confirm the animation was applying at all — it moved 0.113.
-   The animation ran. The effect was 0.04% of the range. The layer is blurred by 72px, and scaling a
-   heavily blurred image changes nothing, because the blur has already removed the detail that
-   scaling would move.
-
-   Animating `filter` would work, since the brightness is right there in it, and it is the wrong
-   trade: re-running a 72px blur sixty times a second for eighteen seconds, indefinitely, across the
-   largest surface in the overlay, for a change nobody can see.
-
-   So the card keeps one ambient motion rather than two. The artwork breathes; the light holds still.
-   That is a smaller idea than the one proposed, and it is the one that is true. */
 
 /* ── 3. Pausing settles the artwork ────────────────────────────────────────────────────────────
    The desaturation says "no colour". This says "stopped". Together they read as a record set down,

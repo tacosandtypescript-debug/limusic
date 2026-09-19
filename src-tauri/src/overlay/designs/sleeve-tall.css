@@ -116,35 +116,36 @@ body[data-design="sleeve-tall"] .eyebrow {
 body[data-design="sleeve-tall"] .progress { margin-top: 9px; }
 body[data-design="sleeve-tall"] .times { margin-top: 6px; }
 
-/* ── 1. A pass of light across the artwork ─────────────────────────────────────────────────────
-   The same gesture as overlay 1, and it belongs here more than it does there: this cover is 190px
-   against that one's 112, so there is nearly twice the surface for the light to cross.
+/* ── 1. A pass of light across the whole card ─────────────────────────────────────────────────
+   Across the **card**, not across the cover. The first version swept only the artwork, and seen on
+   screen that is not light — it is a sticker being lit. Everything around it holds still while one
+   part of the object brightens, and the eye reads the bright thing as the thing that moved. Light
+   falls on the object, and the object here is the card.
 
-   125° rather than the horizontal's 105°, and the angle is the point of doing it separately. Stood
-   up, the light should read as falling from above onto an object on a shelf; laid flat, it reads as
-   a glance across a record held in the hand. The same animation at the same angle would have made
-   the two overlays the same picture at two sizes, which is what this design is explicitly not. */
-@keyframes sleeve-tall-sheen {
-  0%   { transform: translateX(-130%); opacity: 0; }
-  12%  { opacity: 1; }
-  100% { transform: translateX(130%); opacity: 0; }
+   So the band crosses all 380 pixels of it — over the artwork and over the words — and `.sweep`
+   clips it to the card's own radius. Without that clip the light would spill onto the gameplay
+   behind, which on stream is the one thing an overlay must never do.
+
+   125 degrees, and the angle is why the two sleeve overlays do this separately instead of sharing
+   one rule: stood up, the light should read as falling from above onto something on a shelf; laid
+   flat, as a glance across a record held in the hand. The same animation at the same angle would
+   make the two the same picture at two sizes, which is what this design is explicitly not.
+
+   Wide and faint — 52% of the card at 13% white. The first attempt was a narrow bright stripe, and that
+   reads as a sparkle travelling. A pass of light is a wash, not a highlight. */
+@keyframes sleeve-card-sheen-tall {
+  from { transform: translateX(-110%); }
+  to   { transform: translateX(110%); }
 }
-body[data-design="sleeve-tall"] .art::after {
-  content: "";
-  position: absolute; inset: 0; border-radius: 8px;
-  pointer-events: none;
-  /* Wide and faint on purpose. The first version was a 32% band at 34% white, which read as
-     a sparkle travelling across the cover — the gesture is a light *passing*, not a highlight
-     arriving, and a narrow bright stripe is the difference between the two. This one is
-     58% wide at 13% peak: the same travel with nothing to catch the eye. */
+body[data-design="sleeve-tall"] .sweep::after {
   background: linear-gradient(125deg,
-    transparent 21%,
+    transparent 24%,
     oklch(1 0 0 / 13%) 50%,
-    transparent 79%);
-  opacity: 0;
+    transparent 76%);
+  opacity: 1;
 }
-body[data-design="sleeve-tall"].swap-in .art::after {
-  animation: sleeve-tall-sheen var(--dur-art) var(--ease-out) var(--art-lead) both;
+body[data-design="sleeve-tall"].swap-in .sweep::after {
+  animation: sleeve-card-sheen-tall var(--dur-art) var(--ease-out) var(--art-lead) both;
 }
 
 /* ── 2. Pausing settles the artwork ────────────────────────────────────────────────────────────
