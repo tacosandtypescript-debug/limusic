@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>overlay audit</title>
+<!--
+  A legibility bench, not a deliverable. It drops every
+  overlay at 1:1 onto a hostile background so the one thing worth checking can actually be seen —
+  whether the text still reads when the scene behind it does not cooperate.
+
+  `?bg=` picks the background, `?set=wide|tall` which row to render. The overlays are loaded with no
+  `backdrop`, so their transparency is real and the harness background is genuinely behind them,
+  which is the whole point.
+
+  The backgrounds are generated rather than borrowed: a photograph would make the result depend on
+  one particular image, and what needs testing is the *kind* of thing that breaks an overlay — a
+  bright field, a dark one, fine detail at text scale, and a scene whose colours sit where the
+  overlay's own do.
+-->
+<style>
+  html, body { margin: 0; }
+  body { background-repeat: no-repeat; background-size: cover; font: 12px "Segoe UI", sans-serif; }
+  #grid { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
+  .row { display: flex; gap: 16px; align-items: flex-start; }
+  .cell { }
+  .cap {
+    color: #fff; margin-bottom: 5px; font-weight: 600; letter-spacing: 0.02em;
+    text-shadow: 0 1px 3px #000, 0 0 8px #000;
+  }
+  iframe { border: 0; display: block; }
+</style>
+</head>
+<body>
+<div id="grid"></div>
+<script>
+"use strict";
+const q = new URLSearchParams(location.search);
+/* The overlay, from the dev server — not off `file://` with an absolute path to one machine.
+   The page is a shell plus its stylesheets now, and a `file://` load of the shell alone has no
+   CSS at all. Resolved against wherever this bench is served from, so it needs no host written
+   into it. */
+const PAGE = new URL("/", location.href).href.replace(/\/$/, "");
+
+/** Fine, high-contrast detail at roughly text scale: what actually destroys a thin white glyph. */
+function busySvg() {
+  let s = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500">';
+  s += '<rect width="800" height="500" fill="#5b6470"/>';
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const hues = ["#f2f2ee", "#d8dee6", "#8b93a1", "#40474f", "#c9d3dd", "#6d7683", "#e8e2d6"];
+  for (let i = 0; i < 260; i++) {
+    const x = rnd() * 800, y = rnd() * 500, w = 6 + rnd() * 46, h = 4 + rnd() * 26;
+    s += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${hues[i % hues.length]}" opacity="${(0.35 + rnd() * 0.65).toFixed(2)}"/>`;
+  }
+  for (let i = 0; i < 40; i++) {
+    s += `<circle cx="${(rnd() * 800).toFixed(1)}" cy="${(rnd() * 500).toFixed(1)}" r="${(3 + rnd() * 18).toFixed(1)}" fill="${hues[i % hues.length]}" opacity="0.5"/>`;
+  }
+  s += "</svg>";
+  return 'url("data:image/svg+xml;utf8,' + encodeURIComponent(s) + '")';
+}
+
+/** A dusk-ish scene with a light source and a vignette. Not a photograph, and not trying to be:
+ *  a real screenshot would date the README and belongs to whoever took it, while what needs
+ *  showing is how the overlays sit on something that is neither flat nor cooperative. */
+function sceneSvg() {
+  const s = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0.3" y2="1">
+        <stop offset="0" stop-color="#4a5a78"/><stop offset="0.45" stop-color="#232c40"/>
+        <stop offset="1" stop-color="#0c0f16"/>
+      </linearGradient>
+      <radialGradient id="sun" cx="0.74" cy="0.26" r="0.42">
+        <stop offset="0" stop-color="#ffd9a0" stop-opacity="0.75"/>
+        <stop offset="0.5" stop-color="#e08a5a" stop-opacity="0.28"/>
+        <stop offset="1" stop-color="#e08a5a" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="vig" cx="0.5" cy="0.5" r="0.78">
+        <stop offset="0.55" stop-color="#000" stop-opacity="0"/>
+        <stop offset="1" stop-color="#000" stop-opacity="0.7"/>
+      </radialGradient>
+    </defs>
+    <rect width="1600" height="900" fill="url(#sky)"/>
+    <path d="M0 640 L260 560 L520 610 L760 540 L1040 600 L1300 520 L1600 580 L1600 900 L0 900 Z"
+          fill="#141a26" opacity="0.9"/>
+    <path d="M0 740 L320 690 L600 730 L900 660 L1180 720 L1600 680 L1600 900 L0 900 Z"
+          fill="#0a0d14"/>
+    <rect width="1600" height="900" fill="url(#sun)"/>
+    <rect width="1600" height="900" fill="url(#vig)"/>
+  </svg>`;
+  return 'url("data:image/svg+xml;utf8,' + encodeURIComponent(s) + '")';
+}
+
+const BGS = {
+  light:   "linear-gradient(135deg,#fbfbf8,#e9e7e1 55%,#d2cfc7)",
+  dark:    "radial-gradient(120% 120% at 30% 15%,#22242d,#08080b)",
+  busy:    busySvg(),
+  scene:   sceneSvg(),
+  similar: "linear-gradient(120deg,#2b1018,#5d2030 48%,#8a3a20)",
+  bright:  "linear-gradient(100deg,#ffd94a,#ff7a3d 46%,#ff2f78)"
+};
+
+const SETS = {
+  wide: [
+    { id: "sleeve-wide",  w: 620, h: 200 },
+    { id: "playout-wide", w: 760, h: 222 },
+    { id: "vinyl-wide",   w: 680, h: 230 }
+  ],
+  tall: [
+    { id: "sleeve-tall",  w: 380, h: 430 },
+    { id: "playout-tall", w: 380, h: 430 },
+    { id: "vinyl-tall",   w: 400, h: 470 }
+  ]
+};
+
+const bgName = q.get("bg") || "light";
+document.body.style.backgroundImage = BGS[bgName] || BGS.light;
+
+/* `clean=1` drops the captions, and the content is overridable, so the same page can produce both
+   an audit sheet and a README image. The audit wants the labels; a README does not. */
+const CLEAN = q.get("clean") === "1";
+/* The app's own sample content by default: a README should not put a real artist's name and album
+   in a screenshot of a feature that has nothing to do with them. */
+const CONTENT = "&dt=" + encodeURIComponent(q.get("dt") || "Higher Ground") +
+                "&da=" + encodeURIComponent(q.get("da") || "Nova Sky") +
+                "&dal=" + encodeURIComponent(q.get("dal") || "Night Signals");
+
+const grid = document.getElementById("grid");
+if (CLEAN) grid.style.padding = "28px";
+
+/** One design across every card mode, so the modes can be compared side by side. */
+const MODES = ["auto", "transparent", "solid", "translucent", "glass"];
+const one = q.get("design");
+if (one) {
+  const sizes = {
+    "sleeve-wide": [620, 200], "playout-wide": [760, 222], "vinyl-wide": [680, 230],
+    "sleeve-tall": [380, 430], "playout-tall": [380, 430], "vinyl-tall": [400, 470]
+  };
+  const row = document.createElement("div");
+  row.className = "row";
+  for (const mode of MODES) {
+    const [w, h] = sizes[one];
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    if (!CLEAN) cell.innerHTML = `<div class="cap">${one} · card=${mode}</div>`;
+    const f = document.createElement("iframe");
+    f.width = w; f.height = h;
+    f.src = PAGE + "?design=" + one + "&pos=mc&demo=1&card=" + mode + CONTENT;
+    cell.appendChild(f);
+    row.appendChild(cell);
+  }
+  grid.appendChild(row);
+}
+
+for (const setName of (one ? [] : (q.get("set") ? [q.get("set")] : ["wide", "tall"]))) {
+  const row = document.createElement("div");
+  row.className = "row";
+  for (const o of SETS[setName]) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    if (!CLEAN) cell.innerHTML = `<div class="cap">${o.id} · ${o.w}×${o.h} · fondo ${bgName}</div>`;
+    const f = document.createElement("iframe");
+    f.width = o.w;
+    f.height = o.h;
+    f.src = PAGE + "?design=" + o.id + "&pos=mc&demo=1" + CONTENT;
+    cell.appendChild(f);
+    row.appendChild(cell);
+  }
+  grid.appendChild(row);
+}
+</script>
+</body>
+</html>

@@ -122,6 +122,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with open(os.path.join(OVERLAY_DIR, name), encoding="utf-8") as fh:
                     self._send(200, fh.read(), ASSETS[name])
 
+            elif route in ("/audit", "/audit.html"):
+                # The legibility bench. It frames the overlay over six backdrops to check contrast
+                # over a light scene, a busy one, a dark one, and one the same colour as the card.
+                path = os.path.join(HERE, "overlay-audit.html")
+                if not os.path.exists(path):
+                    self._send(404, "audit bench not found")
+                    return
+                with open(path, encoding="utf-8") as fh:
+                    self._send(200, fh.read(), "text/html; charset=utf-8")
+
             elif route in ("/switch", "/switch.html"):
                 if not os.path.exists(SWITCHER):
                     self._send(404, "switcher not generated yet")
