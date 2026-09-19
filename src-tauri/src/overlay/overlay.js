@@ -149,10 +149,11 @@ const COVER_URL = BASE + "cover?";
 const T = (() => {
   const cs = getComputedStyle(body);
   const ms = (name, d) => { const v = parseFloat(cs.getPropertyValue(name)); return Number.isFinite(v) ? v : d; };
-  // No `enter`: the roll is one phase over the whole change, so nothing waits for an incoming half.
-  // The token still exists, and the artwork's own entrance still uses it in CSS.
-  return { text: ms("--dur-text", 300), art: ms("--dur-art", 440),
-           exit: ms("--dur-exit", 218),
+  // Four, not seven. `--dur-text`, `--dur-art` and `--dur-enter` are all read by CSS and by nothing
+  // here — the words have no entrance of their own since the block started rolling, and the artwork's
+  // entrance is an animation rather than something the sequencer waits on. Reading a token nothing
+  // uses is how a table of dead numbers gets built, one plausible entry at a time.
+  return { exit: ms("--dur-exit", 218),
            swap: ms("--dur-swap", 680), color: ms("--dur-color", 680) };
 })();
 const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

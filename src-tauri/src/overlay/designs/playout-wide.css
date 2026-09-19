@@ -78,7 +78,7 @@ body[data-design^="playout"].swap-in .art img {
   animation: playout-art-in var(--dur-art) var(--ease-out) both;
 }
 
-body[data-design^="playout"] .art img {
+body[data-design^="playout"] .art {
   animation: breathe var(--cycle-breathe) ease-in-out infinite;
 }
 

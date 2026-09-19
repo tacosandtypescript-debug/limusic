@@ -467,9 +467,19 @@ fn the_timestamps_are_not_glued_to_the_bar() {
 #[test]
 fn motion_is_defined_once_in_tokens() {
     let src = code();
-    for token in ["--dur-hover", "--dur-btn", "--dur-text", "--dur-art", "--dur-swap", "--dur-color"] {
+    // The scale the brief pinned, minus one.
+    //
+    // `--dur-text` is gone: the brief gave the words their own band, 250-350ms, and they no longer
+    // have their own motion to spend it on. A track change is a roll of the whole block now, so the
+    // text moves at the speed of the change — 700ms, inside the 500-700 the brief allowed for one.
+    // A token nothing reads is worse than a missing one: it looks like a knob.
+    for token in ["--dur-hover", "--dur-btn", "--dur-art", "--dur-swap", "--dur-color"] {
         assert!(src.contains(&format!("{token}:")), "{token} is missing");
     }
+    assert!(
+        !src.contains("--dur-text:"),
+        "the words have no motion of their own since the block started rolling; the token would be dead"
+    );
     // Every animation and transition in the stylesheet must be expressed through a token.
     for (n, line) in src.lines().enumerate() {
         let trimmed = line.trim();
@@ -897,16 +907,31 @@ fn a_pause_is_visible_and_the_artwork_breathes() {
     for family in ["sleeve", "playout"] {
         assert!(
             page().contains(&format!(
-                r#"body[data-design^="{family}"] .art img {{ animation: breathe var(--cycle-breathe)"#
+                r#"body[data-design^="{family}"] .art {{ animation: breathe var(--cycle-breathe)"#
             )),
             "{family}'s artwork never moves while playing"
         );
     }
     // Vinyl is excluded on purpose: its disc already turns, and two motions on the same square fight.
     assert!(
-        !page().contains(r#"body[data-design^="vinyl"] .art img { animation: breathe"#),
+        !page().contains(r#"body[data-design^="vinyl"] .art { animation: breathe"#),
         "vinyl must not get a second motion on the same square"
     );
+    // On the container, not on the image, and that is load-bearing rather than tidy.
+    //
+    // `breathe` animates `transform`, and so does every track-change animation. On the same element
+    // one would overwrite the other. They are split by *role* instead: the container holds the cover
+    // being replaced and never leaves, the image is the thing that changes. That split is what makes
+    // the previous artwork survive a change — it is the `.art` background, and a background cannot
+    // outlive a fade applied to the element that owns it.
+    for family in ["sleeve", "playout", "vinyl"] {
+        assert!(
+            !page().contains(&format!(
+                r#"body[data-design^="{family}"] .art img {{ animation: breathe"#
+            )),
+            "{family}: breathe and the track change both animate transform on .art img"
+        );
+    }
     // And it stops with the music, on every design that has it.
     assert!(page().contains("body.paused .art img { animation-play-state: paused; }"));
 }

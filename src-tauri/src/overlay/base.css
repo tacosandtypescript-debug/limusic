@@ -165,41 +165,35 @@ body {
   font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
-  /* Derived here, not on `:root`, so a design's own `--exit-share` is the one they compute from:
-     custom properties substitute where they are *declared*.
+  /* Derived here, not on `:root`, so that a design's own `--exit-share` is the one they compute
+     from: custom properties substitute where they are *declared*.
 
-     And `--dur-art` / `--dur-text` are capped by the incoming half rather than fixed. That is not
-     fussiness — a longer exit means a shorter entrance, and a fixed duration inside it is simply cut
-     off when the class is removed. It is the same failure as the original bug, one level down, and
-     the numbers said so before any of this was written: at a 0.38 share the artwork would have lost
-     39 ms and the text tail 28 ms, on five of the six overlays. */
+     The share is how much of the change the outgoing content gets, and it is not the same for every
+     design — the record needs the longest, because its whole idea is that it slows down before it
+     leaves. */
   --dur-exit:  calc(var(--dur-swap) * var(--exit-share));
   --dur-enter: calc(var(--dur-swap) * (1 - var(--exit-share)));
 
-  /* The outgoing half. The artwork goes first and the words follow it out, each with its own
-     duration and a small stagger: an exit where everything leaves on the same frame reads as the
-     overlay being switched off, not as the content being replaced. The last word starts at 0.22 of
-     the half and runs 0.68, so the tail lands at 0.90 — inside it, with room. */
-  /* Both exits run to the end of their own phase now, and neither used to.
-   *
-   * The artwork went at 85% and the words at 68% behind a stagger, so the last of them — the controls,
-   * delayed by 22% — finished at 90% of the outgoing half. Everything was gone before the swap, and
-   * then the incoming half opened with `--art-lead` before anything came back. The card spent the
-   * join empty: not a transition, a hole with a track change in the middle of it. Reported as the
-   * change feeling coarse, which is exactly what an empty card between two full ones feels like.
-   *
-   * The lead is deliberate and stays — the artwork leading the words is the whole shape of the
-   * entrance — so the join is one lead long rather than one lead plus everything that finished
-   * early. The artwork is the largest thing on the card and it is now present until the moment the
-   * content changes, which is what stops the card reading as blank. */
-  --dur-exit-art:  calc(var(--dur-exit) * 1);
-  --dur-exit-text: calc(var(--dur-exit) * 0.85);
+  /* How long the artwork takes to leave: the whole outgoing half, no fraction of it.
 
-  /* The incoming half. `--art-lead` is the artwork's head start, and every word is delayed by it:
-     the brief asked for "the new cover arrives, then the words", and without a lead they all began
-     on the same frame and the sequence read as one event instead of two. */
+     Anything shorter and it has finished moving before the content changes, which is the empty frame
+     this sequence spent several rounds failing to close — it went at 85% for a while, and the card
+     was blank for the join. The largest thing on the card being present until the moment of the swap
+     is what stops it reading as empty.
+
+     There is no `--dur-exit-text` here any more, and its absence is the design. The words used to
+     leave on their own stagger with their own duration; both were removed with them, because the
+     block rolls now, as one thing, and nothing in it departs separately. */
+  --dur-exit-art:  calc(var(--dur-exit) * 1);
+
+  /* The incoming half. `--dur-art` is capped by it rather than fixed: a longer exit means a shorter
+     entrance, and a fixed duration inside it is simply cut off when the class is removed. At a 0.38
+     share a flat 440ms would lose 39ms, on five of the six overlays.
+
+     `--art-lead` used to be the artwork's head start before every word, which is what the brief asked
+     for — the cover arrives, then the words. The words no longer have an entrance of their own, so
+     what it delays now is the light that crosses the card on the two sleeve designs. */
   --dur-art:   min(440ms, calc(var(--dur-enter) * 0.95));
-  --dur-text:  min(320ms, calc(var(--dur-enter) * 0.66));
   --art-lead:  calc(var(--dur-enter) * 0.12);
 }
 

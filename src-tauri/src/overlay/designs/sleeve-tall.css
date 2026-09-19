@@ -34,11 +34,11 @@
   100% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
 }
 
-body[data-design^="sleeve"].swap-out .art { animation: sleeve-art-out var(--dur-exit-art) var(--ease-soft) both; }
+body[data-design^="sleeve"].swap-out .art img { animation: sleeve-art-out var(--dur-exit-art) var(--ease-soft) both; }
 
-body[data-design^="sleeve"].swap-in .art { animation: sleeve-art-in var(--dur-art) var(--ease-arrive) both; }
+body[data-design^="sleeve"].swap-in .art img { animation: sleeve-art-in var(--dur-art) var(--ease-arrive) both; }
 
-body[data-design^="sleeve"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }
+body[data-design^="sleeve"] .art { animation: breathe var(--cycle-breathe) ease-in-out infinite; }
 
 body[data-design^="sleeve"] #now::before, body[data-design^="sleeve"] #now::after {
   content: "";

@@ -14,9 +14,9 @@
 
 @keyframes vinyl-art-in { from { opacity: 0; transform: translateX(11%) rotate(16deg) scale(0.97); } }
 
-body[data-design^="vinyl"].swap-out .art { animation: vinyl-art-out var(--dur-exit-art) var(--ease-soft) both; }
+body[data-design^="vinyl"].swap-out .art img { animation: vinyl-art-out var(--dur-exit-art) var(--ease-soft) both; }
 
-body[data-design^="vinyl"].swap-in .art { animation: vinyl-art-in var(--dur-art) var(--ease-out) both; }
+body[data-design^="vinyl"].swap-in .art img { animation: vinyl-art-in var(--dur-art) var(--ease-out) both; }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════
    OVERLAY 5 · VINYL-WIDE — 680 × 230

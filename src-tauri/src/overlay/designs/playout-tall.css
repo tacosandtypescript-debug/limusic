@@ -66,7 +66,7 @@ body[data-design^="playout"].swap-in .art img { animation: playout-art-in var(--
 /* `.art` has no filter of its own, so animating one here promotes it for the duration only. */
 body[data-design="playout-tall"] .art { will-change: auto; }
 
-body[data-design^="playout"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }
+body[data-design^="playout"] .art { animation: breathe var(--cycle-breathe) ease-in-out infinite; }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════ OVERLAY 4 · PLAYOUT-TALL — 380 × 430 The station ident, stacked: cover as a band across the top, plate below. ═══════════════════════════════════════════════════════════════════════════════════════════════ */
 body[data-design="playout-tall"] #now {
