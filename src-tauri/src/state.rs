@@ -2960,6 +2960,56 @@ impl AppState {
     /// "Add to queue": the tracks go at the back of the manual block, ahead of the playing context
     /// and anything the app generated (see [`enqueue_at`]). `continuation` is the next-page token —
     /// the rest of a long playlist is walked in the background instead of adding only page one.
+    /// Apply one request from the Twitch sidecar.
+    ///
+    /// The search and the enqueue live here, in the playback path, rather than in `twitch/`. That
+    /// module owns the Twitch connection and nothing else — see its header — so a viewer's request
+    /// travels down a channel and lands here. It is the same arrangement Listen Together uses, and
+    /// the reason there is exactly one owner of what plays.
+    ///
+    /// The outcome goes back on the caller's `oneshot`, so the reply in chat says what actually
+    /// happened. A caller that assumed success would tell a viewer their song was queued when the
+    /// search had in fact found nothing.
+    pub async fn apply_twitch(self: &std::sync::Arc<Self>, cmd: crate::twitch::TwitchCommand) {
+        use crate::twitch::requests::{Found, Outcome};
+
+        let crate::twitch::TwitchCommand::Request { query, from, reply } = cmd;
+
+        // `record_history: false` — and it is worth being explicit about, because the neighbour is
+        // `true`. A viewer's request is not the user's search, and putting it in the account's
+        // search history would leave a stream's worth of other people's songs in the user's own
+        // autocomplete.
+        let item = match self.clients.get(innertube::METADATA_CLIENT) {
+            Some(client) => match self.it.search_songs(client, &query, false).await {
+                Ok(results) => results.items.into_iter().next(),
+                Err(e) => {
+                    tracing::debug!(error = %e, "twitch: the search failed");
+                    None
+                }
+            },
+            None => None,
+        };
+
+        let Some(item) = item else {
+            let _ = reply.send(Outcome::NoMatch { query });
+            return;
+        };
+
+        let song = Found { title: item.title.clone(), artist: item.artists.clone() };
+
+        // Counted before the insert, and therefore the position the track lands in when it is the
+        // only thing being added — which it is. Under a burst of simultaneous requests two viewers
+        // can be told the same number; the number is informational and the queue is correct, so
+        // that is a fair trade for not holding a lock across an insert.
+        let position = match self.queue_snapshot().await.get("items").and_then(|v| v.as_array()) {
+            Some(items) => items.len() + 1,
+            None => 1,
+        };
+
+        self.add_to_queue(vec![item], Some(from), None).await;
+        let _ = reply.send(Outcome::Queued { song, position });
+    }
+
     pub async fn add_to_queue(
         self: &std::sync::Arc<Self>,
         items: Vec<SongItem>,

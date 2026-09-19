@@ -130,6 +130,15 @@ pub fn sanitize(raw: &str) -> String {
     }
 }
 
+/// How a queue entry is labelled: `twitch:<login>`.
+///
+/// One function rather than the same `format!` in two files. A redemption and a chat message both
+/// end up here, and the label is what the user sees in the queue — if the two spellings ever
+/// disagreed, the queue would show two different sources for the same channel.
+pub fn source_label(user_login: &str) -> String {
+    format!("twitch:{user_login}")
+}
+
 /// Which search result a request takes.
 ///
 /// The first one, deliberately. YouTube Music orders by relevance and its first result is what a

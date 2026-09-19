@@ -115,7 +115,7 @@ impl Redemption {
 
     /// How to label the queue entry.
     pub fn source(&self) -> String {
-        format!("twitch:{}", self.user_login)
+        super::requests::source_label(&self.user_login)
     }
 }
 

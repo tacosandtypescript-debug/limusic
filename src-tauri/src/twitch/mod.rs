@@ -46,13 +46,14 @@ pub mod commands;
 // socket and an app handle, and it is the part that cannot be tested here, so none of the
 // *decisions* are allowed to live in it. What is left is orchestration.
 //
-// `dead_code` is allowed for the four below, and it is a debt with a name rather than a shrug. They
-// are written, tested and unreferenced: the wiring that would call them is the bridge described in
-// this module's header — an `mpsc` channel that `lib.rs` applies to `AppState`, so the playback path
-// keeps one owner. Until that exists, nothing here is reachable from the running app.
+// The bridge these feed is in `lib.rs`: an `mpsc` channel this module sends down and the app applies
+// to `AppState`, so the playback path keeps one owner.
 //
-// When the bridge lands, this attribute comes off. It is here so that the build stays clean and the
-// absence is on the record, rather than the modules looking finished.
+// `dead_code` stays allowed, for a reason that is not "later": each of these exposes a small API
+// that its *tests* exercise, and the tests live in another crate (`tools/verify`), so from the app's
+// point of view a function only the tests call has no caller at all. The alternative is deleting
+// behaviour that is asserted to work — `Role::label` is the inverse of `Role::parse`, `pick` is the
+// policy for choosing between search results — to satisfy a linter that cannot see the caller.
 #[allow(dead_code)]
 pub mod chat;
 #[allow(dead_code)]
@@ -74,7 +75,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 use crate::db::Db;
 use auth::{DeviceCode, Poll, RefreshError, TokenSet};
@@ -189,6 +190,27 @@ pub struct EventSubSnapshot {
     pub recent: Vec<ChatMessage>,
 }
 
+/// What the session asks the app to do with the music.
+///
+/// The session owns the Twitch connection and nothing else — see the module header. It does not
+/// touch the queue and holds no reference to `AppState`, so a request travels down a channel whose
+/// other end `lib.rs` owns and applies. That is the same shape Listen Together uses, and it is what
+/// keeps exactly one owner of the playback path.
+///
+/// The `oneshot` is what makes an answer possible. The bridge is one-way, so without a way back the
+/// session would fire a request into the dark and have nothing to tell the viewer — and a viewer who
+/// is not told asks again, which is the whole reason the cooldown exists.
+pub enum TwitchCommand {
+    Request {
+        query: String,
+        /// Who asked, for the queue entry's label: `twitch:<login>`.
+        from: String,
+        /// Where the outcome comes back. Dropped without a word if the app is shutting down, which
+        /// is why the caller treats a closed channel as "no answer" rather than as a failure.
+        reply: tokio::sync::oneshot::Sender<requests::Outcome>,
+    },
+}
+
 struct Inner {
     config: TwitchConfig,
     client_id: String,
@@ -282,12 +304,26 @@ pub struct TwitchSession {
     /// different lifetimes: the OAuth session outlives any particular socket, and changing channel
     /// restarts the socket without touching the session.
     events_gen: AtomicU64,
+    /// Outbound requests to the music side. `lib.rs` owns the receiving end.
+    commands: mpsc::UnboundedSender<TwitchCommand>,
+    /// The receiving end, held until `lib.rs` takes it at startup.
+    command_rx: Mutex<Option<mpsc::UnboundedReceiver<TwitchCommand>>>,
+    /// The cooldown windows and who asked last. Behind a mutex because it is the state that makes
+    /// the feature work, and shared because two requests can arrive at once.
+    cooldowns: Mutex<cooldown::Cooldowns>,
+    /// The windows `cooldowns` was built with, so a settings change can rebuild it.
+    cooldown_config: Mutex<(u64, u64)>,
+    /// How many requests have been answered, and how many of them queued something. In the snapshot
+    /// so the panel can show that the feature is alive rather than merely enabled.
+    answered: AtomicU64,
+    queued: AtomicU64,
 }
 
 impl TwitchSession {
     /// Build the session from whatever is stored. Does no I/O beyond reading settings, so it is
     /// safe to call on the startup path before the window exists.
     pub fn new(app: AppHandle, db: Arc<Db>) -> Arc<Self> {
+        let (commands, command_rx) = mpsc::unbounded_channel();
         let config = TwitchConfig::from_json(db.get_setting(KEY_CONFIG).as_deref());
         let stored_client_id = db.get_setting(KEY_CLIENT_ID).unwrap_or_default();
         let bundled = settings::bundled_client_id();
@@ -299,6 +335,9 @@ impl TwitchSession {
         } else {
             stored_client_id
         };
+        // Read before `config` moves into `Inner`: the cooldown windows seed the shared state, and
+        // a field cannot be read out of a struct that has already been given away.
+        let (user_cd, global_cd) = (config.user_cooldown_secs, config.global_cooldown_secs);
         Arc::new(TwitchSession {
             app,
             db,
@@ -318,7 +357,51 @@ impl TwitchSession {
             })),
             gen: AtomicU64::new(0),
             events_gen: AtomicU64::new(0),
+            commands,
+            command_rx: Mutex::new(Some(command_rx)),
+            cooldowns: Mutex::new(cooldown::Cooldowns::new(
+                Duration::from_secs(user_cd),
+                Duration::from_secs(global_cd),
+            )),
+            cooldown_config: Mutex::new((user_cd, global_cd)),
+            answered: AtomicU64::new(0),
+            queued: AtomicU64::new(0),
         })
+    }
+
+    /// Hand the receiving end to `lib.rs`, once, at startup.
+    ///
+    /// `Option` rather than a bare receiver so a second call is harmless: a future hot-reload or a
+    /// second window would otherwise either panic or steal the channel, and the bridge would stop
+    /// without saying so.
+    pub async fn take_commands(&self) -> Option<mpsc::UnboundedReceiver<TwitchCommand>> {
+        self.command_rx.lock().await.take()
+    }
+
+    /// Rebuild the cooldowns when the configured windows have changed.
+    ///
+    /// Rebuilding forgets who asked when, and that is the right trade: someone who has just widened
+    /// or closed a window is not owed the old one, and keeping the windows in two places would mean
+    /// deciding which of them is authoritative on every request.
+    async fn cooldowns(
+        &self,
+        user_secs: u64,
+        global_secs: u64,
+    ) -> tokio::sync::MutexGuard<'_, cooldown::Cooldowns> {
+        {
+            let mut current = self.cooldown_config.lock().await;
+            if *current != (user_secs, global_secs) {
+                *current = (user_secs, global_secs);
+                *self.cooldowns.lock().await = cooldown::Cooldowns::new(
+                    Duration::from_secs(user_secs),
+                    Duration::from_secs(global_secs),
+                );
+            }
+        }
+        let mut guard = self.cooldowns.lock().await;
+        // Dead entries cannot change an answer, and a busy channel accumulates one per viewer.
+        guard.prune(std::time::Instant::now());
+        guard
     }
 
     // --- tokens ------------------------------------------------------------------------------
@@ -788,7 +871,7 @@ impl TwitchSession {
             inner.eventsub.connected_at = crate::db::now_secs();
         }
 
-        let subscription = self.subscribe_chat(&welcome.session_id).await?;
+        let subscription = self.subscribe_all(&welcome.session_id).await?;
         {
             let mut inner = self.inner.lock().await;
             inner.eventsub.subscription_id = Some(subscription.id);
@@ -801,6 +884,33 @@ impl TwitchSession {
             "twitch: EventSub live"
         );
         Ok(())
+    }
+
+    /// Create every subscription this session needs, bound to this socket's session.
+    ///
+    /// Chat always; the redemption one only when a reward has been chosen. The EventSub budget for
+    /// a WebSocket session is **10**, so the second subscription is not free — but it is one, and a
+    /// channel that has not configured a reward should not be spending it on redemptions nobody
+    /// will act on.
+    ///
+    /// Returns the chat subscription, which is the one the snapshot reports. A failure on the
+    /// redemption one is not fatal: it is logged and the session keeps reading chat, because losing
+    /// the reward feature is a smaller thing than losing the connection.
+    async fn subscribe_all(
+        self: &Arc<Self>,
+        session_id: &str,
+    ) -> Result<api::Subscription, EventSubError> {
+        let subscription = self.subscribe_chat(session_id).await?;
+        let reward = {
+            let inner = self.inner.lock().await;
+            inner.config.reward_id.trim().to_string()
+        };
+        if !reward.is_empty() {
+            if let Err(e) = self.subscribe_redemptions(session_id, &reward).await {
+                tracing::warn!(error = %e, "twitch: redemptions are not subscribed; chat still is");
+            }
+        }
+        Ok(subscription)
     }
 
     /// Create the `channel.chat.message` subscription bound to this socket's session.
@@ -836,11 +946,46 @@ impl TwitchSession {
             })
     }
 
+    /// Create the redemption subscription for one reward.
+    ///
+    /// Unlike chat, the condition names no user: a redemption is the broadcaster's to see, so there
+    /// is nobody to read it as. It does need the channel, resolved the same way and failing the same
+    /// way, because subscribing without one would attach the subscription to nothing.
+    async fn subscribe_redemptions(
+        self: &Arc<Self>,
+        session_id: &str,
+        reward_id: &str,
+    ) -> Result<api::Subscription, EventSubError> {
+        let token = self.access_token().await.map_err(EventSubError::retryable)?;
+        let (client_id, broadcaster_id) = {
+            let inner = self.inner.lock().await;
+            let broadcaster = inner
+                .config
+                .channel_id
+                .clone()
+                .ok_or_else(|| EventSubError::fatal("Choose a channel first."))?;
+            (inner.client_id.clone(), broadcaster)
+        };
+
+        api::Helix::new(self.http(), &client_id, &token)
+            .subscribe_redemptions(session_id, &broadcaster_id, reward_id)
+            .await
+            .map_err(|e| EventSubError::fatal(self.explain(e)))
+    }
+
     /// Handle one notification: dedupe, parse, and put it in the tail.
     async fn on_notification(self: &Arc<Self>, n: events::Notification, dedupe: &mut Dedupe) {
+        // Phase 3 subscribes to two types. A third means a subscription this app did not create
+        // is bound to this session, which the dedupe below would otherwise let through.
+        if n.kind == rewards::REDEMPTION_ADD {
+            // The dedupe key for a redemption is its own id, which Twitch repeats across the
+            // follow-up `update` events for the same redemption.
+            if dedupe.accept(&format!("redemption:{}", n.message_id)) {
+                self.on_redemption(&n.event).await;
+            }
+            return;
+        }
         if n.kind != events::CHAT_MESSAGE {
-            // Only chat is subscribed in this phase; anything else means a subscription we did not
-            // create is bound to this session.
             tracing::debug!(kind = %n.kind, "twitch: notification for an unsubscribed type");
             return;
         }
@@ -862,7 +1007,10 @@ impl TwitchSession {
             inner.eventsub.duplicates = dedupe.dropped();
             if fresh {
                 inner.eventsub.messages += 1;
-                inner.eventsub.recent.push_front(message);
+                // A clone, because the tail is a display buffer and the pipeline below wants the
+                // message itself. Both only happen for a `fresh` delivery, so a redelivery costs
+                // nothing — and a chat message is a few hundred bytes.
+                inner.eventsub.recent.push_front(message.clone());
                 while inner.eventsub.recent.len() > TAIL_LEN {
                     inner.eventsub.recent.pop_back();
                 }
@@ -871,9 +1019,193 @@ impl TwitchSession {
             }
         }
         self.emit().await;
+
+        // After the emit, and only for a message Twitch delivered once. Answering before the tail
+        // is updated would put the reply in the panel before the message it answers.
+        if fresh {
+            self.on_chat_message(message).await;
+        }
     }
 
-    // --- user actions -----------------------------------------------------------------------
+    // --- answering the channel (phase 3) -------------------------------------------------------
+
+    /// Run one request through the whole thing and say what happened.
+    ///
+    /// `badge_sets` is empty when the request came from a redemption, and `from_reward` says so: a
+    /// redemption has no badges because Twitch decides who may redeem, through the reward's own
+    /// settings. The spend *is* the permission, so the role gate does not apply to it — a channel
+    /// that requires subscribers in chat would otherwise silently refuse the points a non-subscriber
+    /// had already paid.
+    async fn handle_request(
+        self: &Arc<Self>,
+        user_login: &str,
+        user_name: &str,
+        badge_sets: &[&str],
+        query: Option<String>,
+        from_reward: bool,
+    ) -> requests::Outcome {
+        let (enabled, min_role, user_cd, global_cd, reply_in_chat) = {
+            let inner = self.inner.lock().await;
+            let c = &inner.config;
+            (
+                c.requests_enabled,
+                permissions::Role::parse(&c.min_role).unwrap_or(permissions::Role::Everyone),
+                c.user_cooldown_secs,
+                c.global_cooldown_secs,
+                c.reply_in_chat,
+            )
+        };
+
+        let outcome = if !enabled {
+            // Silence would be worse than a refusal here: requests switched off is a deliberate
+            // state, and a viewer who gets nothing assumes the bot is broken.
+            requests::Outcome::NotAllowed(permissions::Role::Everyone)
+        } else if !from_reward && !permissions::allows(min_role, badge_sets) {
+            requests::Outcome::NotAllowed(min_role)
+        } else if query.is_none() {
+            requests::Outcome::NothingAsked
+        } else {
+            let now = std::time::Instant::now();
+            let refusal = {
+                let cds = self.cooldowns(user_cd, global_cd).await;
+                cds.check(user_login, now).err()
+            };
+
+            match refusal {
+                Some(refusal) => requests::Outcome::TooSoon(refusal),
+                None => {
+                    let query = query.expect("checked above");
+                    match self.ask_the_app(query, user_login).await {
+                        None => requests::Outcome::LookupFailed,
+                        Some(outcome) => {
+                            // Recorded only on success. Recording the attempt would lock a viewer
+                            // out for asking about a song that was not found, which punishes them
+                            // for the catalogue's gap.
+                            if outcome.is_success() {
+                                self.cooldowns(user_cd, global_cd).await.record(user_login, now);
+                            }
+                            outcome
+                        }
+                    }
+                }
+            }
+        };
+
+        self.answered.fetch_add(1, Ordering::Relaxed);
+        if outcome.is_success() {
+            self.queued.fetch_add(1, Ordering::Relaxed);
+        }
+        if reply_in_chat {
+            self.say(&outcome.reply(user_name)).await;
+        }
+        outcome
+    }
+
+    /// Send the request down the channel and wait for the app's answer.
+    ///
+    /// `None` means there was nobody listening — the bridge was never taken, or the app is shutting
+    /// down. Both are states the viewer cannot act on, so the caller turns them into a generic
+    /// "try again" rather than reporting a cause.
+    async fn ask_the_app(&self, query: String, user_login: &str) -> Option<requests::Outcome> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.commands
+            .send(TwitchCommand::Request {
+                query,
+                from: requests::source_label(user_login),
+                reply: tx,
+            })
+            .ok()?;
+        rx.await.ok()
+    }
+
+    /// Say something in the channel.
+    ///
+    /// A failure is logged and swallowed. The song is already in the queue by the time this runs, so
+    /// letting a chat problem fail the request would lose something that had already worked.
+    async fn say(self: &Arc<Self>, text: &str) {
+        let (client_id, broadcaster, sender) = {
+            let inner = self.inner.lock().await;
+            (inner.client_id.clone(), inner.config.channel_id.clone(), inner.token_user_id.clone())
+        };
+        let (Some(broadcaster), Some(sender)) = (broadcaster, sender) else {
+            return;
+        };
+        let Ok(token) = self.access_token().await else {
+            return;
+        };
+        if let Err(e) = api::Helix::new(self.http(), &client_id, &token)
+            .send_chat_message(&broadcaster, &sender, text)
+            .await
+        {
+            tracing::debug!(error = %e, "twitch: could not answer in chat");
+        }
+    }
+
+    /// A chat message arrived. Decide whether it asked for anything.
+    async fn on_chat_message(self: &Arc<Self>, message: ChatMessage) {
+        let (enabled, commands) = {
+            let inner = self.inner.lock().await;
+            let c = &inner.config;
+            let aliases: Vec<&str> = c.request_aliases.iter().map(String::as_str).collect();
+            (c.requests_enabled, chat::Commands::new(&c.command_prefix, &aliases))
+        };
+        if !enabled {
+            return;
+        }
+
+        // `Bare` is the command with nothing after it, which earns a reply saying how to use it.
+        // Anything else is not addressed to us, and answering it would make the bot noise.
+        let query = match commands.parse(&message.text) {
+            chat::Parsed::Request(raw) => chat::clean_query(raw),
+            chat::Parsed::Bare => None,
+            chat::Parsed::Other(_) | chat::Parsed::NotACommand => return,
+        };
+
+        let badges: Vec<&str> = message.badges.iter().map(|b| b.set_id.as_str()).collect();
+        self.handle_request(
+            &message.chatter_user_login,
+            &message.chatter_user_name,
+            &badges,
+            query,
+            false,
+        )
+        .await;
+    }
+
+    /// A Channel Points redemption arrived.
+    async fn on_redemption(self: &Arc<Self>, event: &serde_json::Value) {
+        let (enabled, configured) = {
+            let inner = self.inner.lock().await;
+            (inner.config.requests_enabled, inner.config.reward_id.clone())
+        };
+        if !enabled {
+            return;
+        }
+
+        let redemption = match rewards::Redemption::from_event(event) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(error = %e, "twitch: unparseable redemption");
+                return;
+            }
+        };
+        // An unconfigured reward matches nothing, which is the only safe default: the alternative
+        // turns every reward in the channel into a song request.
+        if !redemption.is_actionable(&configured) {
+            return;
+        }
+
+        self.handle_request(
+            &redemption.user_login,
+            &redemption.user_name,
+            &[],
+            redemption.query(),
+            true,
+        )
+        .await;
+    }
+
+    // --- user actions --------------------------------------------------------------------------
 
     /// Set (or clear) the client ID. Not a secret, so the UI may do this.
     pub async fn set_client_id(self: &Arc<Self>, client_id: &str) -> Result<(), String> {

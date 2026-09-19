@@ -459,6 +459,29 @@ pub fn run() {
                 });
             }
 
+            // Bridge: apply Twitch song requests to AppState.
+            //
+            // The session owns the connection and nothing else, so a viewer's request arrives here
+            // rather than reaching into the queue — the same shape as the bridge above, and for the
+            // same reason: the playback path keeps exactly one owner.
+            //
+            // `take_commands` is `Option` so this is safe to run twice; the receiver can only be
+            // taken once, and a second taker would otherwise steal the channel and stop the first
+            // bridge without saying anything.
+            {
+                let st = app_state.clone();
+                let tw = twitch.clone();
+                tauri::async_runtime::spawn(async move {
+                    let Some(mut rx) = tw.take_commands().await else {
+                        tracing::warn!("twitch: the command channel was already taken");
+                        return;
+                    };
+                    while let Some(cmd) = rx.recv().await {
+                        st.apply_twitch(cmd).await;
+                    }
+                });
+            }
+
             // Twitch: pick up a stored token and start the hourly /validate. Twitch requires that
             // validation from any app holding a session, so this runs whether or not the user
             // opted into connecting on launch — a revoked token should read as "disconnected" on

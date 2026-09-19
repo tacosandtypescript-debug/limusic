@@ -255,9 +255,6 @@ impl<'a> Helix<'a> {
     /// broadcaster's to see, so there is nobody to read it as. Naming the reward narrows what
     /// arrives to the one that matters, which is worth doing — the alternative is hearing about
     /// every redemption of every reward in the channel and discarding almost all of them.
-    ///
-    /// Unreferenced until phase 3's bridge lands — see the note on the phase 3 modules in `mod.rs`.
-    #[allow(dead_code)]
     pub async fn subscribe_redemptions(
         &self,
         session_id: &str,
@@ -273,6 +270,76 @@ impl<'a> Helix<'a> {
             session_id,
         )
         .await
+    }
+
+    /// `POST /helix/chat/messages` — say something in the channel.
+    ///
+    /// **A 200 does not mean it was sent.** Twitch answers `is_sent: false` with a `drop_reason`
+    /// when the message was refused — the bot is banned, timed out, the channel is in
+    /// followers-only mode and it does not qualify, or the message broke a rule — and the HTTP
+    /// status is the same either way. A caller that only checks the status reads a silent failure as
+    /// success, which on stream looks like a bot that ignores people.
+    ///
+    /// `sender_id` is the account the token belongs to, not the broadcaster: a moderator's token
+    /// sends as the moderator. Here they are the same account, which is why the session passes its
+    /// own user id.
+    #[allow(dead_code)]
+    pub async fn send_chat_message(
+        &self,
+        broadcaster_id: &str,
+        sender_id: &str,
+        message: &str,
+    ) -> Result<(), HelixError> {
+        // Twitch's own limit. Sending more is refused with a drop reason rather than truncated, so
+        // it is worth not asking — and the module that writes replies already caps them below this.
+        if message.chars().count() > 500 {
+            return Err(HelixError::Transport(format!(
+                "refusing to send {} characters; Twitch's limit is 500",
+                message.chars().count()
+            )));
+        }
+
+        let url = format!("{HELIX}/chat/messages");
+        let body = serde_json::json!({
+            "broadcaster_id": broadcaster_id,
+            "sender_id": sender_id,
+            "message": message,
+        });
+        let text = self.send(|| self.authed(self.http.post(&url)).json(&body)).await?;
+
+        #[derive(serde::Deserialize)]
+        struct Sent {
+            #[serde(default)]
+            is_sent: bool,
+            #[serde(default)]
+            drop_reason: Option<DropReason>,
+        }
+        #[derive(serde::Deserialize)]
+        struct DropReason {
+            #[serde(default)]
+            code: String,
+            #[serde(default)]
+            message: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct SentPage {
+            #[serde(default)]
+            data: Vec<Sent>,
+        }
+
+        let page: SentPage = serde_json::from_str(&text)
+            .map_err(|e| HelixError::Transport(format!("Twitch sent an unexpected reply: {e}")))?;
+        match page.data.into_iter().next() {
+            Some(s) if s.is_sent => Ok(()),
+            Some(s) => {
+                let reason =
+                    s.drop_reason.map(|d| d.message).unwrap_or_else(|| "no reason given".into());
+                Err(HelixError::Transport(format!("Twitch dropped the message: {reason}")))
+            }
+            None => Err(HelixError::Transport(
+                "Twitch accepted the send but reported no message".into(),
+            )),
+        }
     }
 }
 
