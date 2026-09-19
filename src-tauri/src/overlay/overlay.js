@@ -478,13 +478,32 @@ function setCover(raw) {
   // cover that changes on its own — a late thumbnail, a failure — not for one the sequence owns.
   if (!swapping) el.cover.classList.add("swapping");
   const next = new Image();
+  // During a track change the src goes in now rather than when the fetch lands, and that reversal is
+  // the fix for a wipe that wiped from the old cover to the old cover.
+  //
+  // The src was only ever set from `onload` so a swap could not repaint a blank frame on the way in.
+  // That reasoning held while the image was the only thing in the slot. It is not any more: the
+  // artwork's band now holds the outgoing cover as its background, so the slot is never empty and
+  // there is nothing left to wait for. Waiting anyway meant the wipe — a `clip-path` on a fixed
+  // timeline — ran over an image that had not changed yet, revealing the background, which was the
+  // same cover. Nothing moved for 650ms and then the picture jumped.
+  //
+  // `setGlow` and the accent still wait for the load, because both of those read the pixels.
+  if (swapping && url) {
+    el.cover.src = url;
+    el.cover.classList.remove("swapping");
+    el.art.classList.add("has-art");
+    body.classList.add("has-art");
+  }
   next.onload = next.onerror = () => {
     // `onerror` lands here too, which is the point: a cover that cannot be fetched leaves the
     // music note rather than an empty square — and the src is dropped, or the browser paints its
     // own broken-image glyph on top of that note.
     const ok = next.naturalWidth > 0;
     if (ok) {
-      el.cover.src = url;
+      // Already pointed at this url when the change owned the slot; assigning it twice would restart
+      // the decode for nothing.
+      if (el.cover.getAttribute("src") !== url) el.cover.src = url;
       setGlow(url);
     } else {
       el.cover.removeAttribute("src");
