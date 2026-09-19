@@ -135,13 +135,24 @@ body[data-design="playout-wide"] .meta {
 
 /* The wipe: one sweep of accent across the plate as the new track arrives. Driven by the same
    `swap-in` the rest of the sequence uses — the old build triggered this from a separate `is-new`
-   class that nothing set any more, so it had been dead code. */
+   class that nothing set any more, so it had been dead code.
+
+   Two gradients, and the first one is the point. A soft wash crossing a plate is a dissolve; a
+   transmission wipe has an **edge** — the thing doing the wiping, arriving ahead of the colour it
+   leaves behind. So there is a near-sharp line of white riding at 65% of the band, ahead of the
+   accent's own centre, travelling with it. That is the difference between a glow moving across a
+   panel and a mixer cutting to the next source, and this design is the second one.
+
+   65 rather than 50 because the band travels left to right: leading means further along the direction
+   of travel, not the middle of the band. */
 body[data-design="playout-wide"] .meta::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(100deg, transparent 20%, var(--accent) 50%, transparent 80%);
+  background:
+    linear-gradient(100deg, transparent 64.4%, oklch(1 0 0 / 55%) 65%, transparent 65.6%),
+    linear-gradient(100deg, transparent 20%, var(--accent) 50%, transparent 80%);
   opacity: 0;
   transform: translateX(-100%);
 }
@@ -184,6 +195,27 @@ body[data-design="playout-wide"] .bar {
 }
 
 body[data-design="playout-wide"] .fill { border-radius: 0; }
+
+/* ── Division marks on the rail ───────────────────────────────────────────────────────────────
+   A ticker in a transmission chain is graduated: whoever reads it needs to know where they are in
+   the run without reading the numbers, which is much of the reason a rail exists at all rather than
+   a bare fill. Three marks at the quarters, drawn on `.bar` — the one element here that had no
+   pseudo-element of its own — and above the fill rather than under it, so they hold still while the
+   fill passes beneath.
+
+   0.4% wide each. Wider and they read as segments, which would turn one continuous line into four
+   boxes and say something this design does not mean. */
+body[data-design="playout-wide"] .bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(90deg,
+    transparent 0 24.8%, oklch(1 0 0 / 26%) 24.8% 25.2%,
+    transparent 25.2% 49.8%, oklch(1 0 0 / 26%) 49.8% 50.2%,
+    transparent 50.2% 74.8%, oklch(1 0 0 / 26%) 74.8% 75.2%,
+    transparent 75.2%);
+}
 
 /* ── The colour of the small print ─────────────────────────────────────────────────────────────
    The album line ships at `--ink-3`, which is right on a card that is mostly its own dark surface

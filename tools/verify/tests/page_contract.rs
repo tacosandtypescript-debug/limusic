@@ -317,12 +317,46 @@ fn the_dynamic_accent_is_corrected_and_has_a_fallback() {
         src.contains("try { applyAccent(extractAccent(next)); } catch (e) { applyAccent(null); }"),
         "extraction must be wrapped, or a tainted canvas stops the whole render"
     );
-    // The correction band: the numbers that keep an accent legible on a near-black plate and stop
-    // it competing with the title. Loose bounds — the point is that a band exists at all.
-    assert!(src.contains("Math.min(0.82"), "saturation must be capped");
-    assert!(src.contains("Math.max(0.5"), "saturation must be floored");
-    assert!(src.contains("Math.min(0.75"), "lightness must be capped");
-    assert!(src.contains("Math.max(0.6"), "lightness must be floored");
+    // The correction band: the numbers that keep an accent legible on a near-black plate and stop it
+    // competing with the title.
+    //
+    // Parsed rather than pinned. This comment used to say "loose bounds — the point is that a band
+    // exists at all" while the assertions named four exact literals, so widening the band — a design
+    // decision about how much of the artwork's own character the accent keeps, not a bug — broke a
+    // test that was never trying to check those numbers. What it does check is that a band exists and
+    // that its ends leave room: a ceiling at the title's brightness would put the accent in
+    // competition with the words, and a floor above the plate's would make every cover the same.
+    // Scoped to the extraction function: the tick loop clamps too, and its `Math.max(0, …)` would
+    // otherwise be read as a floor of zero. The calls are nested — `Math.min(0.95, Math.max(0.30,
+    // …))` — so the number is taken from the front of the argument list rather than up to the first
+    // closing bracket, which is the inner call's.
+    let scope = src
+        .split_once("function extractAccent")
+        .map(|(_, rest)| rest)
+        .and_then(|rest| rest.split_once("\n}").map(|(body, _)| body))
+        .expect("extractAccent must exist");
+    let clamp = |call: &str| -> Vec<f64> {
+        scope
+            .match_indices(call)
+            .filter_map(|(i, _)| {
+                let rest = &scope[i + call.len()..];
+                let end = rest
+                    .find(|c: char| !c.is_ascii_digit() && c != '.')
+                    .unwrap_or(rest.len());
+                rest[..end].parse::<f64>().ok()
+            })
+            .collect()
+    };
+    let caps = clamp("Math.min(");
+    let floors = clamp("Math.max(");
+    assert!(caps.len() >= 2, "the accent needs a ceiling on both saturation and lightness");
+    assert!(floors.len() >= 2, "and a floor on both");
+    for v in &caps {
+        assert!((0.5..=1.0).contains(v), "a ceiling of {v} is not one");
+    }
+    for v in &floors {
+        assert!((0.1..=0.7).contains(v), "a floor of {v} leaves no room to vary");
+    }
     // And an escape hatch, for a streamer who wants the artwork to stay out of it.
     assert!(src.contains(r#"q.get("dynamic") !== "0""#), "there must be a way to turn it off");
 }
