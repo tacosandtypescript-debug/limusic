@@ -48,10 +48,16 @@
    * change it is the snap — the content plants itself and then creeps, and the change reads as
    * abrupt even though it has 700ms to spend.
    *
-   * This one is a quad-out. It decelerates from the first frame instead of from the second third, so
-   * the same distance over the same time lands as a drift. Nothing else uses it: boot, the sheen, the
-   * equaliser and every loop keep the house curve, because they are not arriving from anywhere. */
-  --ease-arrive: cubic-bezier(0.22, 0.61, 0.36, 1);
+   * The first attempt at a replacement was a quad-out, and measured rather than eyeballed it was
+   * still front-loaded — a quarter of the distance gone in the first tenth of the time, half of it by
+   * a fifth. Better than the house curve and the same shape of mistake. This one spreads the travel
+   * across the whole animation: 3.5% at a twentieth, 8.5% at a tenth, 24% at a fifth, 80% at half,
+   * 99% at nine tenths. The movement happens for as long as the animation lasts, which is what a
+   * drift is and what a roll needs — a board that has already arrived is not a board that moved.
+   *
+   * Nothing else uses it: boot, the sheen, the equaliser and every loop keep the house curve, because
+   * they are not arriving from anywhere. */
+  --ease-arrive: cubic-bezier(0.35, 0.2, 0.25, 1);
   /* Ambient loops. Deliberately outside the bands above: these are not interactions and nothing
      waits on them. Named tokens all the same, so a duration is never a number in a rule. */
   --cycle-eq:     1100ms;
