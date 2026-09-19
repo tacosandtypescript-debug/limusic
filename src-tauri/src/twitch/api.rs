@@ -197,30 +197,26 @@ impl<'a> Helix<'a> {
         Ok(page.data.into_iter().next())
     }
 
-    /// `POST /helix/eventsub/subscriptions` — subscribe this WebSocket session to chat.
+    /// `POST /helix/eventsub/subscriptions` — subscribe this WebSocket session to one event type.
     ///
-    /// The JSON shape is fixed by Twitch: the condition names the channel **and** the user the
-    /// token belongs to ("The User ID to read chat as"), and the transport carries the session id
-    /// from `session_welcome`. A subscription created any other way cannot be attached to a
-    /// WebSocket.
+    /// The JSON shape is fixed by Twitch: a `condition` naming what to watch, and a `transport`
+    /// carrying the session id from `session_welcome`. A subscription created any other way cannot
+    /// be attached to a WebSocket.
     ///
     /// This is on the critical path: it has to land within 10 seconds of the welcome or the server
     /// closes the connection with 4003. So it deliberately does not retry beyond the single 5xx
     /// retry inside [`Helix::send`].
-    pub async fn subscribe_chat(
+    pub async fn subscribe(
         &self,
+        kind: &str,
+        condition: serde_json::Value,
         session_id: &str,
-        broadcaster_id: &str,
-        user_id: &str,
     ) -> Result<Subscription, HelixError> {
         let url = format!("{HELIX}/eventsub/subscriptions");
         let body = serde_json::json!({
-            "type": "channel.chat.message",
+            "type": kind,
             "version": "1",
-            "condition": {
-                "broadcaster_user_id": broadcaster_id,
-                "user_id": user_id,
-            },
+            "condition": condition,
             "transport": {
                 "method": "websocket",
                 "session_id": session_id,
@@ -232,6 +228,51 @@ impl<'a> Helix<'a> {
         page.data.into_iter().next().ok_or_else(|| {
             HelixError::Transport("Twitch accepted the subscription but returned none".into())
         })
+    }
+
+    /// Chat, which needs both the channel and the user the token belongs to — Twitch's "The User ID
+    /// to read chat as", which is what makes the difference between reading chat and not.
+    pub async fn subscribe_chat(
+        &self,
+        session_id: &str,
+        broadcaster_id: &str,
+        user_id: &str,
+    ) -> Result<Subscription, HelixError> {
+        self.subscribe(
+            "channel.chat.message",
+            serde_json::json!({
+                "broadcaster_user_id": broadcaster_id,
+                "user_id": user_id,
+            }),
+            session_id,
+        )
+        .await
+    }
+
+    /// Channel Points redemptions for one reward.
+    ///
+    /// The condition is the channel and the reward, and there is no `user_id`: a redemption is the
+    /// broadcaster's to see, so there is nobody to read it as. Naming the reward narrows what
+    /// arrives to the one that matters, which is worth doing — the alternative is hearing about
+    /// every redemption of every reward in the channel and discarding almost all of them.
+    ///
+    /// Unreferenced until phase 3's bridge lands — see the note on the phase 3 modules in `mod.rs`.
+    #[allow(dead_code)]
+    pub async fn subscribe_redemptions(
+        &self,
+        session_id: &str,
+        broadcaster_id: &str,
+        reward_id: &str,
+    ) -> Result<Subscription, HelixError> {
+        self.subscribe(
+            "channel.channel_points_custom_reward_redemption.add",
+            serde_json::json!({
+                "broadcaster_user_id": broadcaster_id,
+                "reward_id": reward_id,
+            }),
+            session_id,
+        )
+        .await
     }
 }
 

@@ -24,6 +24,29 @@ pub mod settings;
 #[path = "../../../src-tauri/src/twitch/events.rs"]
 pub mod events;
 
+// ── Phase 3 ─────────────────────────────────────────────────────────────────────────────────────
+//
+// Who may ask, how often, and what they may ask for. Every one of these is pure: it takes badge set
+// ids, instants and message text, and answers. That is not a coincidence — it is what lets the rules
+// that decide whose request is honoured be tested without a Twitch connection, a chat message or a
+// clock. The wiring that feeds them lives in `twitch/mod.rs` and is not testable here, which is the
+// reason the decisions were kept out of it.
+
+#[path = "../../../src-tauri/src/twitch/permissions.rs"]
+pub mod permissions;
+
+#[path = "../../../src-tauri/src/twitch/cooldown.rs"]
+pub mod cooldown;
+
+#[path = "../../../src-tauri/src/twitch/chat.rs"]
+pub mod chat;
+
+#[path = "../../../src-tauri/src/twitch/rewards.rs"]
+pub mod rewards;
+
+#[path = "../../../src-tauri/src/twitch/requests.rs"]
+pub mod requests;
+
 /// The pure half of the overlay server: routing, the token gate, and the artwork allowlist.
 ///
 /// Those tests could not run where they were written. The module they lived in pulls in `AppState`

@@ -75,6 +75,60 @@ pub struct TwitchConfig {
     /// Connect on launch when a stored token validates. Off by default: an app that silently
     /// opens a network session and starts answering in someone's chat on startup is a surprise.
     pub auto_connect: bool,
+
+    // ── Phase 3: answering the channel ───────────────────────────────────────────────────────────
+    //
+    // Every field below carries `#[serde(default)]`, and that is not tidiness. The blob is written
+    // by this struct and read straight back, so a config saved before these fields existed has none
+    // of them — and without the defaults the parse fails, `from_json` falls back to `default()`, and
+    // the channel the streamer chose is silently gone on the next launch. The failure looks like
+    // "Twitch forgot my channel", which is a bug report nobody would connect to a new setting.
+    //
+    // Off by default, like `auto_connect`: an app that starts answering a chat it was only
+    // connected to would be a surprise, and a queue filled by strangers is worse than an empty one.
+    /// Whether chat commands are answered at all.
+    #[serde(default)]
+    pub requests_enabled: bool,
+    /// The character a command starts with.
+    #[serde(default = "default_prefix")]
+    pub command_prefix: String,
+    /// The command names that ask for a song, without the prefix.
+    #[serde(default = "default_aliases")]
+    pub request_aliases: Vec<String>,
+    /// The lowest role that may request, as `permissions::Role::label` writes it.
+    #[serde(default = "default_role")]
+    pub min_role: String,
+    /// Seconds one viewer must wait between requests. Zero disables the window.
+    #[serde(default = "default_user_cooldown")]
+    pub user_cooldown_secs: u64,
+    /// Seconds between any two requests, whoever makes them. Zero disables the window.
+    #[serde(default = "default_global_cooldown")]
+    pub global_cooldown_secs: u64,
+    /// The Channel Points reward whose redemptions are song requests. Empty answers none.
+    #[serde(default)]
+    pub reward_id: String,
+    /// Whether to say anything back in chat. Off means silent queueing, which some channels prefer.
+    #[serde(default = "default_true")]
+    pub reply_in_chat: bool,
+}
+
+fn default_prefix() -> String {
+    "!".into()
+}
+fn default_aliases() -> Vec<String> {
+    vec!["sr".into(), "songrequest".into(), "request".into()]
+}
+fn default_role() -> String {
+    "everyone".into()
+}
+fn default_user_cooldown() -> u64 {
+    30
+}
+fn default_global_cooldown() -> u64 {
+    5
+}
+fn default_true() -> bool {
+    true
 }
 
 impl Default for TwitchConfig {
@@ -84,6 +138,14 @@ impl Default for TwitchConfig {
             channel_login: None,
             channel_id: None,
             auto_connect: false,
+            requests_enabled: false,
+            command_prefix: default_prefix(),
+            request_aliases: default_aliases(),
+            min_role: default_role(),
+            user_cooldown_secs: default_user_cooldown(),
+            global_cooldown_secs: default_global_cooldown(),
+            reward_id: String::new(),
+            reply_in_chat: true,
         }
     }
 }
@@ -121,6 +183,62 @@ impl TwitchConfig {
 mod tests {
     use super::*;
 
+    /// A blob written before phase 3 existed has none of its fields, and it still has to load.
+    ///
+    /// This is the failure that would be reported as "Twitch forgot my channel": the parse fails,
+    /// `from_json` falls back to `default()`, and the chosen channel is gone — with nothing on
+    /// screen connecting it to a setting added months later. `#[serde(default)]` on every new field
+    /// is what prevents it, and this is the test that says so.
+    #[test]
+    fn a_config_from_before_phase_3_still_loads() {
+        let old =
+            r#"{"version":1,"channelLogin":"shroud","channelId":"37402112","autoConnect":true}"#;
+        let c = TwitchConfig::from_json(Some(old));
+
+        assert_eq!(c.channel_login.as_deref(), Some("shroud"), "the channel was lost");
+        assert_eq!(c.channel_id.as_deref(), Some("37402112"));
+        assert!(c.auto_connect);
+        // And the new settings arrive inert rather than arbitrary.
+        assert!(!c.requests_enabled, "answering chat must not switch itself on");
+        assert_eq!(c.command_prefix, "!");
+        assert_eq!(c.min_role, "everyone");
+        assert!(c.reward_id.is_empty(), "an unset reward must match no redemption");
+        assert!(c.user_cooldown_secs > 0 && c.global_cooldown_secs > 0);
+        assert_eq!(c.request_aliases, vec!["sr", "songrequest", "request"]);
+    }
+
+    /// The phase 3 settings survive a write and a read, including the list.
+    #[test]
+    fn the_phase_3_settings_round_trip() {
+        let c = TwitchConfig {
+            channel_login: Some("someone".into()),
+            requests_enabled: true,
+            command_prefix: "$".into(),
+            request_aliases: vec!["pedir".into(), "sr".into()],
+            min_role: "subscriber".into(),
+            user_cooldown_secs: 90,
+            global_cooldown_secs: 15,
+            reward_id: "abc-123".into(),
+            reply_in_chat: false,
+            ..Default::default()
+        };
+        let json = c.to_json();
+        // camelCase on disk, like the fields that were already there.
+        for key in [
+            "requestsEnabled",
+            "commandPrefix",
+            "requestAliases",
+            "minRole",
+            "userCooldownSecs",
+            "globalCooldownSecs",
+            "rewardId",
+            "replyInChat",
+        ] {
+            assert!(json.contains(&format!("\"{key}\"")), "missing {key} in {json}");
+        }
+        assert_eq!(TwitchConfig::from_json(Some(&json)), c);
+    }
+
     #[test]
     fn defaults_are_inert() {
         let c = TwitchConfig::default();
@@ -140,6 +258,10 @@ mod tests {
             channel_login: Some("shroud".into()),
             channel_id: Some("37402112".into()),
             auto_connect: true,
+            // Phase 3's fields are set below by their own test; this one is about the round trip,
+            // and `..Default::default()` keeps it from having to be edited every time a setting is
+            // added. That is not hypothetical — it failed to compile the moment these eight arrived.
+            ..Default::default()
         };
         let json = c.to_json();
         // Pin the on-disk keys, which is what a mismatched rename would break.

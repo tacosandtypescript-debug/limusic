@@ -37,8 +37,16 @@ pub const ASSETS: &[(&str, &str, &str)] = &[
     ("base.css", include_str!("base.css"), "text/css; charset=utf-8"),
     ("designs/sleeve-wide.css", include_str!("designs/sleeve-wide.css"), "text/css; charset=utf-8"),
     ("designs/sleeve-tall.css", include_str!("designs/sleeve-tall.css"), "text/css; charset=utf-8"),
-    ("designs/playout-wide.css", include_str!("designs/playout-wide.css"), "text/css; charset=utf-8"),
-    ("designs/playout-tall.css", include_str!("designs/playout-tall.css"), "text/css; charset=utf-8"),
+    (
+        "designs/playout-wide.css",
+        include_str!("designs/playout-wide.css"),
+        "text/css; charset=utf-8",
+    ),
+    (
+        "designs/playout-tall.css",
+        include_str!("designs/playout-tall.css"),
+        "text/css; charset=utf-8",
+    ),
     ("designs/vinyl-wide.css", include_str!("designs/vinyl-wide.css"), "text/css; charset=utf-8"),
     ("designs/vinyl-tall.css", include_str!("designs/vinyl-tall.css"), "text/css; charset=utf-8"),
     ("overlay.js", include_str!("overlay.js"), "text/javascript; charset=utf-8"),
@@ -534,10 +542,9 @@ mod tests {
                 "{family} shares nothing between its orientations — the split went wrong"
             );
             for (sel, body) in shared {
-                let other = rules(b)
-                    .into_iter()
-                    .find(|(s, _)| *s == sel)
-                    .unwrap_or_else(|| panic!("{family}: `{sel}` is shared but missing from {tall}"));
+                let other = rules(b).into_iter().find(|(s, _)| *s == sel).unwrap_or_else(|| {
+                    panic!("{family}: `{sel}` is shared but missing from {tall}")
+                });
                 assert_eq!(
                     body, other.1,
                     "{family}: `{sel}` has drifted — {wide} and {tall} no longer say the same thing"
@@ -545,9 +552,7 @@ mod tests {
             }
 
             // And neither file may carry a rule for the other orientation.
-            for (name, own, other_side) in
-                [(wide, "wide", "tall"), (tall, "tall", "wide")]
-            {
+            for (name, own, other_side) in [(wide, "wide", "tall"), (tall, "tall", "wide")] {
                 let foreign = format!(r#"body[data-design="{family}-{other_side}"]"#);
                 assert!(
                     !asset(name).expect("sheet").1.contains(&foreign),

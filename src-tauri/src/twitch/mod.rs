@@ -39,6 +39,31 @@ mod settings;
 /// `pub` rather than re-exported with a glob.
 pub mod commands;
 
+// Phase 3: who may ask, how often, and what they may ask for.
+//
+// Every one of these is pure — badge ids, instants and message text in, an answer out — and every
+// one has tests in `tools/verify`. That is deliberate: this file is the only part that needs a
+// socket and an app handle, and it is the part that cannot be tested here, so none of the
+// *decisions* are allowed to live in it. What is left is orchestration.
+//
+// `dead_code` is allowed for the four below, and it is a debt with a name rather than a shrug. They
+// are written, tested and unreferenced: the wiring that would call them is the bridge described in
+// this module's header — an `mpsc` channel that `lib.rs` applies to `AppState`, so the playback path
+// keeps one owner. Until that exists, nothing here is reachable from the running app.
+//
+// When the bridge lands, this attribute comes off. It is here so that the build stays clean and the
+// absence is on the record, rather than the modules looking finished.
+#[allow(dead_code)]
+pub mod chat;
+#[allow(dead_code)]
+pub mod cooldown;
+#[allow(dead_code)]
+pub mod permissions;
+#[allow(dead_code)]
+pub mod requests;
+#[allow(dead_code)]
+pub mod rewards;
+
 pub use api::{Helix, HelixError, TwitchUser};
 pub use settings::TwitchConfig;
 
