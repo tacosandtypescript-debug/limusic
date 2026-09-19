@@ -15,12 +15,14 @@ mod lyrics;
 mod media;
 mod mini;
 mod orchestrator;
+mod overlay;
 mod potoken;
 mod session;
 mod state;
 #[cfg(target_os = "windows")]
 mod taskbar;
 mod tray;
+mod twitch;
 mod videoproxy;
 mod webview;
 
@@ -395,6 +397,15 @@ pub fn run() {
                 .unwrap_or_else(|| "wss://fedora-1.tail9c4985.ts.net/ws".into());
             let (lt, lt_sync_rx) = listentogether::LtSession::new(handle.clone(), lt_url);
 
+            // Twitch integration (twitch/). Phase 1 is the account session alone: it owns its
+            // connection and nothing else, holds no reference to `AppState`, and cannot move the
+            // music yet. That is deliberate — it is the same sidecar shape as Listen Together, so
+            // when phase 3 gives Twitch something to do it goes down an mpsc channel into a bridge
+            // below rather than reaching into the queue. Registered as its own managed state, so
+            // the `tw_*` commands need no change to `AppState`.
+            let twitch = twitch::TwitchSession::new(handle.clone(), db.clone());
+            app.manage(twitch.clone());
+
             let app_state = Arc::new(AppState::new(
                 it,
                 clients,
@@ -414,6 +425,11 @@ pub fn run() {
             // never sees a googlevideo URL (context/11). videoproxy.rs explains why a socket and
             // not a custom scheme.
             videoproxy::start(app_state.clone());
+
+            // The OBS overlay's own loopback server (overlay.rs). Separate from the video proxy
+            // because its lifetime and its audience are different: the proxy's URL is internal and
+            // changes every launch, while this one is pasted into OBS and has to keep working.
+            overlay::start(app_state.clone());
 
             // Local music artwork reaches the webview over the asset protocol, whose configured
             // scope is empty — the folders it may read are the ones the user picked (local.rs).
@@ -442,6 +458,12 @@ pub fn run() {
                     }
                 });
             }
+
+            // Twitch: pick up a stored token and start the hourly /validate. Twitch requires that
+            // validation from any app holding a session, so this runs whether or not the user
+            // opted into connecting on launch — a revoked token should read as "disconnected" on
+            // the panel rather than surfacing later as a mystery 401.
+            twitch.restore();
 
             // Restore the last session's queue (paused, not autoplaying). context/11 §state.
             {
@@ -606,6 +628,7 @@ pub fn run() {
             commands::set_playback_params,
             commands::get_queue,
             commands::get_playback,
+            overlay::overlay_info,
             commands::video_stream,
             commands::forget_video_stream,
             commands::get_settings,
@@ -672,6 +695,12 @@ pub fn run() {
             commands::lt_approve_suggestion,
             commands::lt_reject_suggestion,
             commands::lt_request_sync,
+            twitch::commands::tw_status,
+            twitch::commands::tw_set_client_id,
+            twitch::commands::tw_connect,
+            twitch::commands::tw_cancel,
+            twitch::commands::tw_disconnect,
+            twitch::commands::tw_set_channel,
             commands::get_lyrics,
             commands::lastfm_connect,
             commands::lastfm_disconnect,

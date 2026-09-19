@@ -12,6 +12,10 @@ rustypipe_reports/
 # Last.fm API credentials — read by src-tauri/build.rs, never committed (public repo).
 /src-tauri/lastfm.keys
 
+# Twitch client ID — same mechanism as lastfm.keys. Not actually a secret (it travels in a header
+# on every request), but it is per-deployment config and build.rs reads it from here.
+/src-tauri/twitch.keys
+
 # Local design notes & tooling — kept out of the public repo
 /context/
 /progress/

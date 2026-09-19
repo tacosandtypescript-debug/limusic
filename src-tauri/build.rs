@@ -14,6 +14,21 @@ fn main() {
             }
         }
     }
+    // The Twitch client ID, same mechanism and same gitignored file convention (`twitch.keys`).
+    // It is NOT a secret — it travels in a header on every request and appears in the consent URL
+    // — so this only exists so a fork can ship a working default instead of asking every user to
+    // register their own application. A value pasted into Settings overrides it (twitch/mod.rs).
+    println!("cargo:rerun-if-changed=twitch.keys");
+    if let Ok(keys) = std::fs::read_to_string("twitch.keys") {
+        for line in keys.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                let (k, v) = (k.trim(), v.trim());
+                if k == "LIMUSIC_TWITCH_CLIENT_ID" {
+                    println!("cargo:rustc-env={k}={v}");
+                }
+            }
+        }
+    }
     // tauri-build watches tauri.conf.json but not the icons it embeds, so editing a PNG here
     // leaves `generate_context!` emitting the old `default_window_icon` (window, tray, taskbar).
     println!("cargo:rerun-if-changed=icons");

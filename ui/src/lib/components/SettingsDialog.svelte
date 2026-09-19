@@ -13,7 +13,9 @@
 		Cancel01Icon as RemoveIcon,
 		Copy01Icon,
 		Coffee02Icon,
-		DiscordIcon
+		DiscordIcon,
+		TwitchIcon,
+		Presentation01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -31,6 +33,8 @@
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import Changelog from '$lib/components/Changelog.svelte';
 	import DiscordSettings from '$lib/components/DiscordSettings.svelte';
+	import TwitchSettings from '$lib/components/TwitchSettings.svelte';
+	import OverlaySettings from '$lib/components/OverlaySettings.svelte';
 	import {
 		THEMES,
 		FONTS,
@@ -64,12 +68,14 @@
 	import { t, setLocale, currentLocale, LOCALES, type LocaleId } from '$lib/i18n.svelte';
 	import { appIcon, chooseAppIcon } from '$lib/appicon.svelte';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'twitch' | 'overlay' | 'data' | 'about';
 	const TABS = $derived<{ id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[]>([
 		{ id: 'general', label: t('settings.tabs.general'), hint: t('settings.tabs.general_hint'), icon: Settings02Icon },
 		{ id: 'themes', label: t('settings.tabs.themes'), hint: t('settings.tabs.themes_hint'), icon: PaintBoardIcon },
 		{ id: 'playback', label: t('settings.tabs.playback'), hint: t('settings.tabs.playback_hint'), icon: PlayCircleIcon },
 		{ id: 'discord', label: t('settings.tabs.discord'), hint: t('settings.tabs.discord_hint'), icon: DiscordIcon },
+		{ id: 'twitch', label: t('settings.tabs.twitch'), hint: t('settings.tabs.twitch_hint'), icon: TwitchIcon },
+		{ id: 'overlay', label: t('settings.tabs.overlay'), hint: t('settings.tabs.overlay_hint'), icon: Presentation01Icon },
 		{ id: 'data', label: t('settings.tabs.data'), hint: t('settings.tabs.data_hint'), icon: Database02Icon },
 		{ id: 'about', label: t('settings.tabs.about'), hint: t('settings.tabs.about_hint'), icon: InformationCircleIcon }
 	]);
@@ -790,6 +796,10 @@
 								{@render row({ title: t('settings.general.stream_clients'), below: clientList })}
 							</div>
 						</section>
+					{:else if tab === 'twitch'}
+						<TwitchSettings />
+					{:else if tab === 'overlay'}
+						<OverlaySettings />
 					{:else if tab === 'data'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>{t('settings.sections.network')}</h3>

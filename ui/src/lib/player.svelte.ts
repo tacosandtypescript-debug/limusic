@@ -13,6 +13,7 @@ import type {
 	SongItem
 } from './api';
 import { applyLtState, lt } from './lt.svelte';
+import { applyTwitchState } from './twitch.svelte';
 import { clearCached, invalidateCached, LIBRARY_SONGS_KEY } from './pagecache';
 import * as pl from './personal';
 import type { Personal } from './personal';
@@ -1244,7 +1245,10 @@ export function initApp(mini = false): () => void {
 			if (s.role !== 'none' && playback.speed !== 1) setTempoPitch(1, playback.semitones);
 			applyLtState(s);
 		}),
-		api.onLtNotice((msg) => toast(msg))
+		api.onLtNotice((msg) => toast(msg)),
+		// Twitch (src-tauri/src/twitch/). Phase 1 is the account session only, so there is nothing
+		// to do with the snapshot but store it — the settings panel is the only reader.
+		api.onTwState(applyTwitchState)
 	];
 	const teardown = () => subs.forEach((u) => u.then((f) => f()));
 	api.getQueue()
@@ -1294,5 +1298,8 @@ export function initApp(mini = false): () => void {
 	loadBlocked();
 	// Seed the Listen Together state (server URL, any active room after a UI reload).
 	api.ltGetState().then(applyLtState).catch(() => {});
+	// Seed the Twitch session. `restore()` in Rust validates a stored token asynchronously, so this
+	// first read can legitimately say "disconnected" and be corrected by the event a moment later.
+	api.twStatus().then(applyTwitchState).catch(() => {});
 	return teardown;
 }

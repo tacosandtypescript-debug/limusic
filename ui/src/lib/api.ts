@@ -786,3 +786,137 @@ export const onLtState = (cb: (s: LtState) => void): Promise<UnlistenFn> =>
 	listen<LtState>('lt-state', (e) => cb(e.payload));
 export const onLtNotice = (cb: (msg: string) => void): Promise<UnlistenFn> =>
 	listen<string>('lt-notice', (e) => cb(e.payload));
+
+// --- Twitch (src-tauri/src/twitch/) ----------------------------------------------------------
+// Phase 1 is the account session only: connect the streamer's own Twitch account, pick the
+// channel, and keep the token alive. Commands, rewards and Bits come later, and they arrive on the
+// same connection — nothing here has to change shape for them.
+//
+// Shaped after the Listen Together block above, for the same reason it exists: the panel renders
+// from an event, the mutations are commands, and the outcome of a connect is delivered by the
+// event rather than the promise (the user has to leave for twitch.tv and come back, which outlives
+// any reasonable command call).
+
+/** A Twitch account or channel. `broadcasterType` is `''` for a normal account. */
+export interface TwitchUser {
+	id: string;
+	login: string;
+	displayName: string;
+	profileImageUrl?: string | null;
+	broadcasterType: string;
+}
+
+export interface TwitchConfig {
+	version: number;
+	/** The channel the bot will listen to. `null` until one is chosen. */
+	channelLogin: string | null;
+	/** The same channel's numeric id — every EventSub condition needs an id, not a login. */
+	channelId: string | null;
+	/** Connect on launch when a stored token still validates. Off by default. */
+	autoConnect: boolean;
+}
+
+/** The Device Code prompt: what to type, and where. Only present while `phase` is `connecting`. */
+export interface TwitchDevicePrompt {
+	userCode: string;
+	/** Ready to open as-is — Twitch builds this URL, including the `?public=true` flag. */
+	verificationUri: string;
+	/** Unix seconds. Past this the code is dead and the flow must be restarted. */
+	expiresAt: number;
+}
+
+export interface TwitchSnapshot {
+	phase: 'disconnected' | 'connecting' | 'connected';
+	/** The effective client ID. Not a secret: it ships in a header on every request. */
+	clientId: string;
+	/** True when it came from the build rather than from the user. */
+	clientIdBundled: boolean;
+	/** Whether a client ID is set at all — the one thing required before connecting. */
+	configured: boolean;
+	device: TwitchDevicePrompt | null;
+	/** The account that authorised the app. */
+	account: TwitchUser | null;
+	/** The channel being listened to, once one is chosen. */
+	channel: TwitchUser | null;
+	/** False for a normal account: Twitch 403s Channel Points for anyone not affiliate/partner. */
+	channelPointsAvailable: boolean;
+	config: TwitchConfig;
+	scopes: string[];
+	/** Unix seconds. Tokens last ~4 hours, but Twitch's advice is to refresh on a 401 — this is
+	 *  for display, not for scheduling. */
+	expiresAt: number;
+	validatedAt: number;
+	error: string | null;
+	/** Whether chat is being read, and what has come through. */
+	eventsub: TwitchEventSub;
+}
+
+/** A chat badge, raw. `setId` is what roles are read from (`moderator`, `vip`, `subscriber`, …). */
+export interface TwitchBadge {
+	setId: string;
+	id: string;
+	info: string;
+}
+
+export interface TwitchChatMessage {
+	/** A UUID. Unique per message, which is what makes it the dedupe key. */
+	messageId: string;
+	chatterUserId: string;
+	chatterUserLogin: string;
+	chatterUserName: string;
+	text: string;
+	badges: TwitchBadge[];
+	/** Present only when the message is a cheer. */
+	bits: number | null;
+	/** Present when the message came from a Channel Points redemption. */
+	rewardId: string | null;
+	isReply: boolean;
+}
+
+export type TwitchEventSubStatus = 'off' | 'connecting' | 'live' | 'retrying' | 'failed';
+
+export interface TwitchEventSub {
+	status: TwitchEventSubStatus;
+	/** The session id subscriptions are bound to. */
+	sessionId: string | null;
+	subscriptionId: string | null;
+	connectedAt: number;
+	/** Notifications accepted since the session started. */
+	messages: number;
+	/** Notifications dropped as redeliveries — Twitch delivers at least once. */
+	duplicates: number;
+	error: string | null;
+	/** The tail, newest first. */
+	recent: TwitchChatMessage[];
+}
+
+export const twStatus = () => invoke<TwitchSnapshot>('tw_status');
+export const twSetClientId = (clientId: string) =>
+	invoke<void>('tw_set_client_id', { clientId });
+/** Starts the device flow. The outcome arrives via `onTwState`, not this promise. */
+export const twConnect = () => invoke<void>('tw_connect');
+/** Abandons a flow waiting for approval, leaving an existing session untouched. */
+export const twCancel = () => invoke<void>('tw_cancel');
+/** Signs out and revokes the token server-side (best effort). */
+export const twDisconnect = () => invoke<void>('tw_disconnect');
+/** Chooses the channel; pass an empty string to clear it. */
+export const twSetChannel = (login: string) => invoke<void>('tw_set_channel', { login });
+
+export const onTwState = (cb: (s: TwitchSnapshot) => void): Promise<UnlistenFn> =>
+	listen<TwitchSnapshot>('tw-state', (e) => cb(e.payload));
+
+// --- OBS overlay (src-tauri/src/overlay.rs) --------------------------------------------------
+// A loopback server that serves the now-playing card OBS loads as a browser source. The link is
+// the deliverable, so `baseUrl` carries the token: it is the value a human copies into OBS.
+export interface OverlayInfo {
+	/** False when the listener could not bind at all, which the panel says out loud rather than
+	 *  offering a link that will not answer. */
+	available: boolean;
+	port: number;
+	/** The configured port was busy and the overlay moved to another one. */
+	portFellBack: boolean;
+	/** `http://127.0.0.1:<port>/<token>/` — append `?design=…&pos=…&scale=…`. */
+	baseUrl: string;
+}
+
+export const overlayInfo = () => invoke<OverlayInfo>('overlay_info');

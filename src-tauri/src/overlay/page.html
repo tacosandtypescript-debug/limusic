@@ -1,0 +1,1383 @@
+<!doctype html>
+<!--
+  OBS overlays. One overlay = one fixed composition.
+
+  THERE ARE NO LAYOUT MEDIA QUERIES IN THIS FILE, ON PURPOSE — see `the_page_has_no_layout_media_queries`
+  in the contract tests for why, and what it cost to learn. Every size inside an overlay is a fixed
+  pixel value; the design declares a BASE SIZE and the container scales that box uniformly. Resizing
+  the browser source enlarges the whole thing and never reflows a single element.
+
+  ── Query parameters ────────────────────────────────────────────────────────────────────────────
+  design   sleeve-wide | sleeve-tall | playout-wide | playout-tall | vinyl-wide | vinyl-tall
+  pos      tl tc tr ml mc mr bl bc br      where the box sits in the canvas
+  scale    0.5..3                          extra multiplier on top of the fit
+
+  card     auto | transparent | solid | translucent | glass
+           `auto` is the design's own surface, unchanged. The rest are choices laid on top.
+  preset   minimal | card | glass | dynamic | vinyl      bundles; explicit options win
+  cardop   0..1     surface opacity          cardblur  px
+  cardr    px       corner radius            cardpad   px
+  cardglow 0..1     accent glow              cardborder 0|1
+  cardshadow 0..1   drop shadow              cardcolor neutral | dynamic
+  dynamic  0        turn artwork colour extraction off
+  accent   %23RRGGBB   pin the accent and skip extraction
+
+  demo=1, idle=show, backdrop=dark|light|checker, dv/dt/da/dal/dc/ddur/dpos for sample content.
+
+  Opened from `file://` it runs with no server at all, which is how a design gets worked on without
+  rebuilding the app that embeds it.
+-->
+<html lang="es" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- The labels are part of the design ("AHORA SUENA" is set in letterspaced capitals against the
+     card), and a browser that offers to translate the page drops a bar across the top of the canvas
+     — exactly where a top-anchored overlay sits. -->
+<meta name="google" content="notranslate">
+<title>LiMusic · overlay</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   TOKENS
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Motion ─────────────────────────────────────────────────────────────────────────────────
+     One scale, referenced by name everywhere, instead of durations scattered per component. The
+     bands are the ones the design brief pinned: hover 120-180, buttons 150-250, text 250-350,
+     artwork 350-500, a whole track change 500-700, a palette change 500-800. */
+  --dur-hover:  150ms;
+  --dur-btn:    200ms;
+  --dur-text:   300ms;
+  --dur-art:    440ms;
+  --dur-swap:   620ms;
+  --dur-color:  680ms;
+  --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);   /* the house easing: fast in, long settle */
+  --ease-soft:  cubic-bezier(0.33, 0, 0.15, 1);  /* for things that leave */
+  /* Ambient loops. Deliberately outside the bands above: these are not interactions and nothing
+     waits on them. Named tokens all the same, so a duration is never a number in a rule. */
+  --cycle-eq:     1100ms;
+  --cycle-sheen:  3.6s;
+  --cycle-breathe: 18s;
+
+  /* ── Colour ─────────────────────────────────────────────────────────────────────────────────
+     LiMusic's own dark theme, so the overlay reads as part of the app. */
+  --ink:        oklch(0.985 0 0);
+  --ink-2:      oklch(0.78 0.012 285);
+  /* Secondary text. Was 0.62, which is fine on the plate over a dark scene and *not* fine over a
+     bright one: a translucent plate washes out. 0.68 still reads clearly quieter than the artist
+     while holding above 4.5:1 against the plate in its worst case (a white scene behind it). */
+  --ink-3:      oklch(0.68 0.016 285);
+  --accent:     oklch(0.455 0.188 13.697);
+  /* Small text needs a lighter accent than a fill does: the crimson above is chosen for areas, not
+     for 11px letters. Derived with color-mix, so an accent coming from the artwork carries through
+     to the text and the glows without anything else having to know. */
+  --accent-ink: color-mix(in oklab, var(--accent), white 46%);
+  --accent-soft: color-mix(in oklab, var(--accent), transparent 45%);
+  /* 0 = no glow, 1 = the design's own. Scaling rather than switching keeps `cardglow=0.4` honest. */
+  --glow:       1;
+
+  /* ── The card ────────────────────────────────────────────────────────────────────────────────
+     Every design's support surface is built from these, which is what makes one `?card=` option
+     able to serve all six. `auto` leaves them at the design's own values — the appearance that was
+     measured and verified — and the named modes override them. */
+  --card-bg:     oklch(0.145 0.008 285 / 88%);
+  --card-blur:   20px;
+  --card-radius: 24px;
+  --card-edge:   1px solid oklch(1 0 0 / 17%);
+  --card-shadow: 0 24px 60px -18px oklch(0 0 0 / 78%);
+  /* A hairline of light along the top edge and a darker foot. Not decoration: a flat translucent
+     rectangle reads as a hole cut in the scene, and a slight internal gradient is what makes it
+     read as a surface the content is resting on. */
+  --card-sheen:  linear-gradient(180deg, oklch(1 0 0 / 6%), transparent 42%, oklch(0 0 0 / 18%));
+  --hair:        oklch(1 0 0 / 14%);
+
+  --pad:        22px;
+  --gap:        18px;
+  --art:        112px;
+  --title:      30px;
+  --artist:     15px;
+  --album:      12px;
+  --small:      11px;
+  --time:       12px;
+
+  /* The design's natural box. Overridden per overlay from the table in the script, which is the
+     single source of truth for base sizes. */
+  --base-w:     620px;
+  --base-h:     200px;
+}
+
+/* ── Card modes ────────────────────────────────────────────────────────────────────────────────
+   `auto` deliberately has no block: it is the absence of an override. */
+body[data-card="transparent"] {
+  --card-bg: transparent; --card-blur: 0px; --card-edge: 1px solid transparent;
+  --card-shadow: none; --card-sheen: none;
+}
+body[data-card="solid"] {
+  --card-bg: oklch(0.13 0.008 285); --card-blur: 0px;
+}
+body[data-card="translucent"] {
+  --card-bg: oklch(0.145 0.008 285 / 88%); --card-blur: 0px;
+}
+body[data-card="glass"] {
+  /* Genuinely glassy, which means genuinely more transparent — 72% is a real choice, not the
+     default. `auto` keeps the 88% that was measured against a white scene. */
+  --card-bg: oklch(0.145 0.008 285 / 72%); --card-blur: 22px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; height: 100%;
+  background: transparent;          /* the one line that makes it an overlay */
+  overflow: hidden;
+}
+/* Preview backdrops. Opt-in, so the default — and therefore every OBS source — stays transparent.
+   `checker` is the one that exposes what a flat colour hides: a design that reads on black and on
+   white can still lose its edges over a busy, mid-tone scene. */
+body[data-backdrop="dark"]  { background: #17161b; }
+body[data-backdrop="light"] { background: #e8e6e1; }
+body[data-backdrop="checker"] {
+  background-color: #4a4a52;
+  background-image:
+    linear-gradient(45deg, #2a2a30 25%, transparent 25%, transparent 75%, #2a2a30 75%),
+    linear-gradient(45deg, #2a2a30 25%, transparent 25%, transparent 75%, #2a2a30 75%);
+  background-size: 48px 48px;
+  background-position: 0 0, 24px 24px;
+}
+
+body {
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Stage: the nine anchors, and the uniform scale ─────────────────────────────────────────── */
+#stage {
+  position: fixed; inset: 0;
+  display: flex;
+  padding: 0;                       /* no margin: the container IS the overlay's box */
+}
+body[data-pos^="t"] #stage { align-items: flex-start; }
+body[data-pos^="m"] #stage { align-items: center; }
+body[data-pos^="b"] #stage { align-items: flex-end; }
+body[data-pos$="l"] #stage { justify-content: flex-start; }
+body[data-pos$="c"] #stage { justify-content: center; }
+body[data-pos$="r"] #stage { justify-content: flex-end; }
+
+/* The fixed box. Its size never depends on the container — that is the point. */
+#now {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--base-w);
+  height: var(--base-h);
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  opacity: 1;
+  transition: opacity var(--dur-art) var(--ease-out);
+  /* Scaling happens here, from the corner the overlay is anchored to, so growing it never moves
+     that corner. `fit()` sets --fit; `?scale=` multiplies it. */
+  transform-origin: var(--origin, bottom left);
+  scale: calc(var(--fit, 1) * var(--scale, 1));
+}
+
+/* No track: leave the canvas alone. `idle=show` keeps it for a "starting soon" screen. */
+body.idle:not([data-idle="show"]) #now { opacity: 0; }
+body.idle[data-idle="show"] #now { opacity: 0.55; }
+body.idle .progress, body.idle .album, body.idle .controls { visibility: hidden; }
+body.idle .eq { visibility: hidden; }
+body.idle .controls button { pointer-events: none; }
+
+/* The first paint only. `boot` is added once and removed when it has played, so a stream that runs
+   for eight hours does not re-run its own entrance every time the state polls. */
+body.boot #now { animation: boot-in var(--dur-swap) var(--ease-out) both; }
+@keyframes boot-in {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* ── Artwork ────────────────────────────────────────────────────────────────────────────────── */
+.art { position: relative; flex: 0 0 auto; width: var(--art); height: var(--art); }
+.art img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  border-radius: 10px; background: oklch(0.212 0.019 285 / 62%);
+  /* The incoming cover fades and settles rather than cutting. The src is only swapped once the new
+     image has decoded, so the old artwork stays up until the new one can actually be painted — a
+     swap on `src` alone repaints a blank frame first, which is the flash this avoids. */
+  transition: opacity var(--dur-art) var(--ease-out), scale var(--dur-art) var(--ease-out);
+}
+.art img.swapping { opacity: 0; scale: 0.96; }
+.art .fallback {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  border-radius: 10px; background: oklch(0.212 0.019 285 / 62%); color: var(--ink-3);
+}
+.art .fallback svg { width: 36%; height: 36%; }
+.art.has-art .fallback { display: none; }
+
+/* ── Text ───────────────────────────────────────────────────────────────────────────────────── */
+/* `max-width: 100%` is load-bearing on the two stacked designs, where `#now` is a column with
+   `align-items: center`: a flex item's cross size is its max-content size, so a long `nowrap` title
+   made `.meta` wider than the card and the words spilled past both edges. Constrained here, the
+   clip on `.title` does its job and the overflow is measurable — which is what the marquee needs. */
+.meta {
+  min-width: 0; max-width: 100%;
+  flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center;
+}
+
+.eyebrow {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 6px;
+  font-size: var(--small);
+  font-weight: 650; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--accent-ink);
+}
+/* Both are clipped boxes with a span inside: the clip handles a title too long for one line, and
+   the span is what the marquee moves, so the swap animation on the box and the scroll on the
+   content never fight over `transform`. */
+.title, .artist {
+  margin: 0;
+  display: block; overflow: hidden; white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.title > span, .artist > span { display: inline-block; will-change: transform; }
+.title {
+  font-size: var(--title); font-weight: 700; line-height: 1.15; letter-spacing: -0.02em;
+}
+.artist {
+  margin-top: 3px; font-size: var(--artist); font-weight: 500; color: var(--ink-2);
+}
+.album {
+  margin: 2px 0 0; font-size: var(--album); font-weight: 450;
+  color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Starts after a pause, drifts slowly, rests at both ends. `alternate` is what gives the rest at
+   the far end without a second keyframe; the duration is set per title from how far it has to
+   travel, so a slightly-too-long title and a very long one scroll at the same speed. */
+.title.marquee > span, .artist.marquee > span {
+  animation: marquee var(--marquee-dur, 12s) var(--ease-soft) infinite alternate;
+}
+/* A centred box that overflows shows its *middle*, because the overflow is split between both
+   edges — so the name would start halfway through. Anything long enough to scroll reads from the
+   beginning instead, which is the only useful part of a title. */
+.title.marquee, .artist.marquee { text-align: left; }
+@keyframes marquee {
+  0%, 14%   { transform: translateX(0); }
+  86%, 100% { transform: translateX(var(--shift, 0px)); }
+}
+
+/* ── Equaliser: the "playing" signal, and the only ambient motion besides the record ─────────── */
+.eq { display: flex; align-items: flex-end; gap: 2px; height: 10px; }
+.eq i {
+  width: 2px; border-radius: 1px; background: currentColor;
+  animation: eq var(--cycle-eq) ease-in-out infinite; transform-origin: bottom;
+}
+.eq i:nth-child(1) { height: 40%; animation-delay: -200ms; }
+.eq i:nth-child(2) { height: 100%; animation-delay: -600ms; }
+.eq i:nth-child(3) { height: 65%; animation-delay: -100ms; }
+.eq i:nth-child(4) { height: 85%; animation-delay: -450ms; }
+/* Deliberately shallow: 0.45 to 1 rather than 0.2 to 1. At the deeper range four 2px bars read as
+   flicker at the edge of vision, which is the opposite of what an ambient indicator should do. */
+@keyframes eq { 0%, 100% { transform: scaleY(0.45); opacity: 0.8; } 50% { transform: scaleY(1); opacity: 1; } }
+/* Paused stops the loop and dims it: a stopped equaliser is the whole signal. */
+body.paused .eq i { animation: none; opacity: 0.4; transform: scaleY(0.4); }
+
+/* ── Progress ───────────────────────────────────────────────────────────────────────────────── */
+.progress { margin-top: 12px; width: 100%; }
+/* No `overflow: hidden`: it clipped the fill's soft glow at the leading edge, which is most of what
+   makes the bar feel alive. The fill carries its own radius instead. */
+.bar { height: 4px; border-radius: 999px; background: var(--hair); position: relative; }
+.fill {
+  position: relative;
+  height: 100%; width: 0%; border-radius: inherit; background: var(--accent);
+  box-shadow: 0 0 calc(10px * var(--glow)) -1px var(--accent);
+  /* Driven by rAF: a CSS transition would fight the interpolation. The sequencer adds one briefly,
+     and only for a seek, where the alternative is the bar teleporting. */
+}
+/* The travelling highlight. `background-position` is paint-only, so this costs no layout — the one
+   ambient effect on the bar that is not driven by the position value. */
+.fill::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background-image: linear-gradient(90deg, transparent, oklch(1 0 0 / 26%), transparent);
+  background-size: 45% 100%; background-repeat: no-repeat;
+  animation: sheen var(--cycle-sheen) linear infinite;
+}
+@keyframes sheen { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+/* The current position, marked. Small enough to be a detail rather than a control — this is an
+   overlay, and a scrubber you cannot grab would be a lie. */
+.fill::after {
+  content: ""; position: absolute; right: -3px; top: 50%; width: 7px; height: 7px;
+  translate: 0 -50%; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 calc(9px * var(--glow)) var(--accent-soft);
+}
+body.paused .fill::before { animation-play-state: paused; }
+
+.times {
+  display: flex; justify-content: space-between; align-items: baseline;
+  /* 8, not 6. The bar and its timestamps are one unit, but at 6 the row read as attached to the
+     rule rather than sitting under it. */
+  margin-top: 8px;
+  font-size: var(--time); font-variant-numeric: tabular-nums; color: var(--ink-3);
+}
+/* Remaining, not total: the number a listener actually wants is how long is left. */
+.remaining { color: var(--ink-2); }
+
+/* ── Controls ─────────────────────────────────────────────────────────────────────────────────
+   One definition for all six overlays. `playout` used to shrink these to 30×28 with a 3px radius
+   for its DIN look, which read as a different control set in the same family — the transport is
+   the one element a viewer compares across overlays. Only the *timecode* beside it varies. */
+.controls { display: flex; align-items: center; gap: 9px; margin-top: 13px; }
+.controls button {
+  position: relative;
+  display: grid; place-items: center;
+  width: 34px; height: 34px; padding: 0;
+  border: 0; border-radius: 10px;
+  background: transparent; color: var(--ink-2); cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out),
+              scale var(--dur-btn) var(--ease-out), opacity var(--dur-btn) var(--ease-out);
+}
+.controls button:hover { background: oklch(1 0 0 / 8%); color: var(--ink); }
+.controls button:active { scale: 0.9; }
+.controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The disabled state, which is "nothing is playing" — the controls stay visible so the overlay's
+   shape does not change, but they stop claiming to be usable. */
+body.idle .controls button { opacity: 0.38; }
+/* 19px in a 34px box, not 17: at 17 the transport read as an afterthought next to a 30px title. */
+.controls svg { width: 19px; height: 19px; }
+.controls .play svg { width: 21px; height: 21px; }
+/* One button, two glyphs, cross-faded. Both stay in the layout and swap opacity and scale, so
+   play/pause reads as a transition rather than the icon being replaced between two frames. */
+.controls .glyph-play, .controls .glyph-pause {
+  position: absolute; inset: 0; margin: auto;
+  transition: opacity var(--dur-hover) var(--ease-out), scale var(--dur-btn) var(--ease-out);
+}
+body.paused .controls .glyph-pause { opacity: 0; scale: 0.55; }
+body.paused .controls .glyph-play { opacity: 1; scale: 1; }
+body:not(.paused) .controls .glyph-play { opacity: 0; scale: 0.55; }
+body:not(.paused) .controls .glyph-pause { opacity: 1; scale: 1; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   THE TRACK CHANGE
+
+   One sequence, in this order, every time:
+
+     1. the old content leaves          (.swap-out)
+     2. the new cover starts moving     (.swap-in, artwork first)
+     3. the new cover arrives
+     4. the words follow, staggered     (title, then artist, then album)
+     5. the palette settles             (the accent tween, which runs across all of it)
+
+   Steps 1 and 2 are separate classes because the DOM changes between them: the outgoing animation
+   has to play on the old content and the incoming one on the new. A single class could not do both,
+   and re-triggering one animation on a text node that has already been replaced is how you get the
+   "old cover vanishes, new cover appears" cut this replaced.
+
+   Nothing here animates layout: transforms and opacity only, so a track change never makes OBS
+   re-lay-out the page.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+@keyframes text-out { to { opacity: 0; transform: translateY(-6px); } }
+@keyframes text-in  { from { opacity: 0; transform: translateY(9px); } }
+
+/* Shared by every design: the words leave together, and come back in a short stagger. */
+body.swap-out .title, body.swap-out .artist, body.swap-out .album,
+body.swap-out .progress, body.swap-out .controls, body.swap-out .eyebrow {
+  animation: text-out var(--dur-text) var(--ease-soft) both;
+}
+body.swap-in .title  { animation: text-in var(--dur-text) var(--ease-out) 40ms both; }
+body.swap-in .artist { animation: text-in var(--dur-text) var(--ease-out) 85ms both; }
+body.swap-in .album  { animation: text-in var(--dur-text) var(--ease-out) 125ms both; }
+body.swap-in .eyebrow { animation: text-in var(--dur-text) var(--ease-out) both; }
+body.swap-in .progress,
+body.swap-in .controls { animation: text-in var(--dur-text) var(--ease-out) 165ms both; }
+
+/* A swap in progress suspends the marquee: two animations on nested elements both moving is fine,
+   but a title scrolling while its container is also sliding reads as a glitch. */
+body.swap-in .marquee > span, body.swap-out .marquee > span { animation: none; }
+
+/* Sleeve — an internal update. The card does not move; only what is inside it. The old cover
+   settles back and the new one comes forward, which is the smallest gesture that still reads as
+   a change rather than a cut. */
+@keyframes sleeve-art-out { to { opacity: 0; transform: scale(0.94); } }
+@keyframes sleeve-art-in  { from { opacity: 0; transform: scale(1.05); } }
+body[data-design^="sleeve"].swap-out .art { animation: sleeve-art-out var(--dur-art) var(--ease-soft) both; }
+body[data-design^="sleeve"].swap-in .art  { animation: sleeve-art-in var(--dur-art) var(--ease-out) both; }
+
+/* Playout — the cover band is large, so it travels. The old one continues off to the left the way
+   it would have if it had never stopped, and the new one arrives from the other side. */
+@keyframes playout-art-out { to { opacity: 0; transform: translateX(-14%) scale(1.02); } }
+@keyframes playout-art-in  { from { opacity: 0; transform: translateX(14%) scale(1.02); } }
+body[data-design^="playout"].swap-out .art { animation: playout-art-out var(--dur-art) var(--ease-soft) both; }
+body[data-design^="playout"].swap-in .art  { animation: playout-art-in var(--dur-art) var(--ease-out) both; }
+
+/* Vinyl — the physical one. The record winds down as the swap begins (the spin loop reads the
+   `swapping` state, not a CSS animation), drifts and turns a little as it leaves, and the new one
+   arrives slowly and is still gathering speed when the text settles. */
+@keyframes vinyl-art-out { to { opacity: 0; transform: translateX(-9%) rotate(-14deg) scale(0.97); } }
+@keyframes vinyl-art-in  { from { opacity: 0; transform: translateX(11%) rotate(16deg) scale(0.97); } }
+body[data-design^="vinyl"].swap-out .art { animation: vinyl-art-out var(--dur-art) var(--ease-soft) both; }
+body[data-design^="vinyl"].swap-in .art  { animation: vinyl-art-in var(--dur-art) var(--ease-out) both; }
+
+/* Play-out vertical is the one whose cover fills its top half, so its change is photographic: a
+   crossfade with a breath of scale, and a very short defocus that hides the moment the image is
+   swapped. The blur is on the outgoing frame only — bringing the new one back into focus from soft
+   is what makes it read as a dissolve rather than a swap. */
+@keyframes playout-tall-art-out { to { opacity: 0; transform: scale(1.04); filter: blur(5px); } }
+@keyframes playout-tall-art-in  { from { opacity: 0; transform: scale(1.015); filter: blur(4px); } }
+body[data-design="playout-tall"].swap-out .art { animation: playout-tall-art-out var(--dur-art) var(--ease-soft) both; }
+body[data-design="playout-tall"].swap-in .art  { animation: playout-tall-art-in var(--dur-art) var(--ease-out) both; }
+/* `.art` has no filter of its own, so animating one here promotes it for the duration only. */
+body[data-design="playout-tall"] .art { will-change: auto; }
+
+/* ── Ambient: the sleeve-tall cover breathes, and the vinyl accent glows ─────────────────────── */
+/* 0.5% over 18s. Below the threshold of noticing and above the threshold of the overlay feeling
+   inert, which is the only place an ambient zoom is worth having. */
+@keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.006); } }
+body[data-design="sleeve-tall"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }
+body[data-design="sleeve-tall"].paused .art img { animation-play-state: paused; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 1 · SLEEVE-WIDE — 620 × 200
+   The album as a physical object. The sleeve is tilted as if set down on a table, and a blurred,
+   oversized copy of the same artwork lights the plate from behind. Colour taken from the record
+   without reading a pixel of it, which canvas could not do anyway: i.ytimg.com sends no CORS
+   header, so getImageData would taint.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="sleeve-wide"] #now {
+  padding: var(--pad);
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border: var(--card-edge);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow), inset 0 1px 0 oklch(1 0 0 / 8%);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.25);
+  isolation: isolate;
+}
+body[data-design="sleeve-wide"] #now::before {
+  content: ""; position: absolute; inset: -20%; z-index: -1;
+  background-image: var(--cover); background-size: cover; background-position: center;
+  filter: blur(72px) saturate(1.8) brightness(0.85);
+  opacity: calc(0.55 * var(--glow));
+  transition: opacity var(--dur-color) var(--ease-out);
+  border-radius: 50%;
+}
+body[data-design="sleeve-wide"]:not(.has-art) #now::before { opacity: 0; }
+body[data-design="sleeve-wide"] .art {
+  border-radius: 6px; rotate: -2.5deg;
+  box-shadow: 0 14px 30px -10px oklch(0 0 0 / 75%),
+              0 0 calc(16px * var(--glow)) color-mix(in oklab, var(--accent), transparent 40%);
+}
+body[data-design="sleeve-wide"] .art img { border-radius: 6px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 2 · SLEEVE-TALL — 380 × 430
+   The same object, stood up: cover above, words below, centred. It is a separate overlay and not a
+   narrow rendering of the wide one — the stacking is part of this design, not a reaction to a
+   container that got thin.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="sleeve-tall"] #now {
+  --art: 190px;
+  --card-radius: 26px;
+  padding: 26px;
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border: var(--card-edge);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow), inset 0 1px 0 oklch(1 0 0 / 8%);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.25);
+  isolation: isolate;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+body[data-design="sleeve-tall"] #now::before {
+  content: ""; position: absolute; inset: -18%; z-index: -1;
+  background-image: var(--cover); background-size: cover; background-position: center;
+  filter: blur(80px) saturate(1.8) brightness(0.85);
+  opacity: calc(0.55 * var(--glow));
+  transition: opacity var(--dur-color) var(--ease-out);
+  border-radius: 50%;
+}
+body[data-design="sleeve-tall"]:not(.has-art) #now::before { opacity: 0; }
+body[data-design="sleeve-tall"] .art {
+  border-radius: 8px; rotate: -2deg;
+  box-shadow: 0 18px 34px -12px oklch(0 0 0 / 75%),
+              0 0 calc(16px * var(--glow)) color-mix(in oklab, var(--accent), transparent 40%);
+}
+body[data-design="sleeve-tall"] .art img { border-radius: 8px; }
+body[data-design="sleeve-tall"] .eyebrow { justify-content: center; margin-top: 20px; }
+body[data-design="sleeve-tall"] .controls { justify-content: center; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 3 · PLAYOUT-WIDE — 760 × 222
+   A broadcast lower-third. Bahnschrift (DIN-flavoured, ships with Windows) for the plate, Cascadia
+   Mono for the timecode, and progress drawn as a hard-edged ticker — the difference between a
+   media player and a transmission chain.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="playout-wide"] #now {
+  --pad: 20px;
+  --card-radius: 0px;
+  padding: 0; gap: 0; background: none; border: 0;
+  box-shadow: var(--card-shadow);
+  align-items: stretch;
+  font-family: Bahnschrift, "DIN Alternate", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+}
+/* A square band filling the box's full height, derived from the base rather than given its own
+   number — one size, so the two cannot disagree. */
+body[data-design="playout-wide"] .art { width: var(--base-h); height: 100%; border-radius: 0; }
+body[data-design="playout-wide"] .art img,
+body[data-design="playout-wide"] .art .fallback { border-radius: 0; }
+body[data-design="playout-wide"] .meta {
+  flex: 1 1 auto;
+  padding: 14px var(--pad) 18px;
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border-block: var(--card-edge); border-inline-end: var(--card-edge);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.2);
+  overflow: hidden;
+  /* The one place this design takes a colour from the artwork: a hairline of it along the plate's
+     top edge, the way a rack unit catches light. The plate itself stays the plate. */
+  box-shadow: inset 0 1px 0 var(--accent-soft);
+}
+/* The wipe: one sweep of accent across the plate as the new track arrives. Driven by the same
+   `swap-in` the rest of the sequence uses — the old build triggered this from a separate `is-new`
+   class that nothing set any more, so it had been dead code. */
+body[data-design="playout-wide"] .meta::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 20%, var(--accent) 50%, transparent 80%);
+  opacity: 0; transform: translateX(-100%);
+}
+body[data-design="playout-wide"].swap-in .meta::after {
+  animation: wipe var(--dur-swap) var(--ease-out);
+}
+@keyframes wipe {
+  0%   { opacity: 0.5; transform: translateX(-100%); }
+  100% { opacity: 0;   transform: translateX(100%); }
+}
+body[data-design="playout-wide"] .eyebrow { color: var(--ink-3); letter-spacing: 0.2em; }
+body[data-design="playout-wide"] .eyebrow::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 calc(8px * var(--glow)) var(--accent);
+}
+body[data-design="playout-wide"].paused .eyebrow::before { background: var(--ink-3); box-shadow: none; }
+body[data-design="playout-wide"] .eq i { background: var(--ink-3); }
+body[data-design="playout-wide"] .title {
+  font-size: 28px; font-weight: 600; letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+/* The ticker used to be pinned with `position: absolute; bottom: 0`, on the theory that its
+   containing block would be the plate. It never was: it resolved against an ancestor whose bottom
+   happened to sit on the timestamps row, so the line rendered one pixel under the numbers —
+   measured on a capture, times 133-140 and line 141. In the flow now, where it lands is a value
+   rather than a consequence. */
+body[data-design="playout-wide"] .bar {
+  position: static;
+  height: 3px; border-radius: 0; background: oklch(1 0 0 / 12%);
+}
+body[data-design="playout-wide"] .fill { border-radius: 0; }
+/* A hard rule needs no scrubber dot; the ticker's own leading edge is the marker. */
+body[data-design="playout-wide"] .fill::after { display: none; }
+body[data-design="playout-wide"] .fill::before { background-image: none; }
+body[data-design="playout-wide"] .times,
+body[data-design="playout-wide"] .controls {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; letter-spacing: 0.06em;
+}
+/* 12px, double the base 8: this design's bar is a hard 3px rule rather than a soft pill, so the
+   pair reads tighter at the same distance. */
+body[data-design="playout-wide"] .times { margin-top: 12px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 4 · PLAYOUT-TALL — 380 × 430
+   The station ident, stacked: cover as a band across the top, plate below.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="playout-tall"] #now {
+  --card-radius: 0px;
+  padding: 0; gap: 0; background: none; border: 0;
+  box-shadow: var(--card-shadow);
+  flex-direction: column; align-items: stretch;
+  font-family: Bahnschrift, "DIN Alternate", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+}
+body[data-design="playout-tall"] .art { width: 380px; height: 200px; border-radius: 0; }
+body[data-design="playout-tall"] .art img,
+body[data-design="playout-tall"] .art .fallback { border-radius: 0; }
+body[data-design="playout-tall"] .meta {
+  flex: 1 1 auto;
+  padding: 18px 22px 20px;
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border-inline: var(--card-edge); border-block-end: var(--card-edge);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.2);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 var(--accent-soft);
+}
+body[data-design="playout-tall"] .meta::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 20%, var(--accent) 50%, transparent 80%);
+  opacity: 0; transform: translateX(-100%);
+}
+body[data-design="playout-tall"].swap-in .meta::after {
+  animation: wipe var(--dur-swap) var(--ease-out);
+}
+body[data-design="playout-tall"] .eyebrow { color: var(--ink-3); letter-spacing: 0.2em; }
+body[data-design="playout-tall"] .eyebrow::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 calc(8px * var(--glow)) var(--accent);
+}
+body[data-design="playout-tall"].paused .eyebrow::before { background: var(--ink-3); box-shadow: none; }
+body[data-design="playout-tall"] .eq i { background: var(--ink-3); }
+body[data-design="playout-tall"] .title {
+  font-size: 26px; font-weight: 600; text-transform: uppercase;
+}
+/* Same correction as the horizontal one: the ticker is in the flow. */
+body[data-design="playout-tall"] .bar {
+  position: static;
+  height: 3px; border-radius: 0; background: oklch(1 0 0 / 12%);
+}
+body[data-design="playout-tall"] .fill { border-radius: 0; }
+body[data-design="playout-tall"] .fill::after { display: none; }
+body[data-design="playout-tall"] .fill::before { background-image: none; }
+body[data-design="playout-tall"] .times,
+body[data-design="playout-tall"] .controls {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; letter-spacing: 0.06em;
+}
+body[data-design="playout-tall"] .times { margin-top: 12px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 5 · VINYL-WIDE — 680 × 230
+   Typography first. No plate at all in `auto`: a soft scrim under the words, the cover turning like
+   a record, progress as a ring around it. The quietest of the six.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="vinyl-wide"] #now {
+  --art: 132px;
+  --title: 38px;
+  --gap: 26px;
+  --card-radius: 20px;
+  padding: 0; background: none; border: 0; box-shadow: none;
+  isolation: isolate;
+}
+/* The shape is the load-bearing decision, and it took two attempts to get right.
+
+   A first version centred a small radial on the box, which put its strongest part behind the record
+   and its weakest behind the words — backwards. A second added a masked `backdrop-filter`; on a
+   light background that produced a grey smear and left white text on mid-grey, worse than nothing.
+   What is here is one *wide* ellipse anchored over the text: strong across the whole word block,
+   fading well before the record and before the edges, so the scene falls away behind the title
+   instead of a panel being laid over it.
+
+   In an explicit `card` mode the scrim is replaced by a real surface — see the rule below. */
+body[data-design^="vinyl"] #now::before {
+  content: ""; position: absolute; inset: -14% -10%; z-index: -1; pointer-events: none;
+  background: radial-gradient(140% 180% at 76% 50%,
+    oklch(0 0 0 / 88%) 0%, oklch(0 0 0 / 78%) 52%,
+    oklch(0 0 0 / 30%) 82%, transparent 100%);
+  opacity: var(--card-scrim, 1);
+  transition: opacity var(--dur-color) var(--ease-out);
+}
+body[data-design="vinyl-tall"] #now::before {
+  background: radial-gradient(150% 110% at 50% 84%,
+    oklch(0 0 0 / 88%) 0%, oklch(0 0 0 / 78%) 50%,
+    oklch(0 0 0 / 30%) 82%, transparent 100%);
+}
+/* Choosing a card mode means choosing a surface, so the shaped scrim gives way to it. */
+body:not([data-card="auto"])[data-design^="vinyl"] #now::before {
+  inset: 0;
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border: var(--card-edge);
+  border-radius: var(--card-radius);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.1);
+  opacity: 1;
+}
+
+body[data-design^="vinyl"] .art {
+  border-radius: 50%;
+  display: grid; place-items: center;
+}
+body[data-design^="vinyl"] .art::before {
+  content: ""; position: absolute; inset: -22%; border-radius: 50%;
+  background: radial-gradient(closest-side, oklch(0 0 0 / 62%), transparent 78%);
+}
+body[data-design^="vinyl"] .art img {
+  /* Rotation is driven from JS, not by a CSS animation: `animation-play-state: paused` stopped the
+     record dead, and a record that stops dead reads as a frozen image. `--spin` is eased toward the
+     play state, so pausing winds it down and playing winds it back up. */
+  border-radius: 50%; rotate: var(--spin, 0deg);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent), transparent 40%),
+              0 18px 40px -14px oklch(0 0 0 / 80%),
+              0 0 calc(22px * var(--glow)) color-mix(in oklab, var(--accent), transparent 65%);
+}
+/* Spindle hole, so it reads as a record and not a round photo. */
+body[data-design^="vinyl"] .art::after {
+  content: ""; position: absolute; width: 13%; height: 13%; border-radius: 50%;
+  background: oklch(0.145 0.008 285); box-shadow: inset 0 0 0 1px oklch(1 0 0 / 18%);
+}
+body[data-design^="vinyl"] .ring {
+  position: absolute; inset: -9%; border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--p, 0) * 1turn), var(--hair) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+}
+body[data-design^="vinyl"] .eyebrow,
+body[data-design^="vinyl"] .bar,
+body[data-design^="vinyl"] .controls { display: none; }
+body[data-design^="vinyl"] .title {
+  font-weight: 800; letter-spacing: -0.035em;
+  text-shadow: 0 1px 3px oklch(0 0 0 / 92%), 0 4px 28px oklch(0 0 0 / 88%);
+}
+body[data-design^="vinyl"] .artist {
+  text-transform: uppercase; letter-spacing: 0.14em; font-weight: 600;
+  text-shadow: 0 1px 3px oklch(0 0 0 / 92%), 0 2px 16px oklch(0 0 0 / 88%);
+}
+body[data-design^="vinyl"] .album,
+body[data-design^="vinyl"] .times {
+  text-shadow: 0 1px 3px oklch(0 0 0 / 92%), 0 2px 14px oklch(0 0 0 / 88%);
+}
+body[data-design="vinyl-wide"] .artist { font-size: 14px; }
+body[data-design="vinyl-wide"] .times { justify-content: flex-start; gap: 8px; margin-top: 8px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 6 · VINYL-TALL — 400 × 470
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="vinyl-tall"] #now {
+  --art: 190px;
+  --title: 36px;
+  --card-radius: 20px;
+  padding: 0; background: none; border: 0; box-shadow: none;
+  flex-direction: column; justify-content: center; align-items: center; text-align: center;
+  isolation: isolate;
+}
+body[data-design="vinyl-tall"] .meta { margin-top: 22px; }
+body[data-design="vinyl-tall"] .artist { font-size: 13px; }
+body[data-design="vinyl-tall"] .times { justify-content: center; gap: 8px; margin-top: 8px; }
+
+/* `animation-delay` matters as much as the duration: the entry animations use `fill-mode: both`, so
+   a staggered delay holds the element at its `from` keyframe — opacity 0 — for the length of that
+   delay. Zeroing the duration alone would still leave the title invisible. A stagger is motion too.
+   Everything else here is a preference: the EQ is decorative, the marquee is ambient, and the
+   record is a nine-second rotation. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+  }
+  body .eq i { animation: none; }
+}
+</style>
+</head>
+<body data-design="sleeve-wide" data-pos="bl" data-card="auto" class="idle">
+  <div id="stage">
+    <main id="now">
+      <div class="art" id="art">
+        <img id="cover" alt="" decoding="async">
+        <span class="fallback" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+          </svg>
+        </span>
+        <span class="ring" id="ring"></span>
+      </div>
+
+      <div class="meta">
+        <p class="eyebrow">
+          <span>Ahora suena</span>
+          <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        </p>
+        <h1 class="title" id="title"><span id="titleText">—</span></h1>
+        <p class="artist" id="artist"><span id="artistText"></span></p>
+        <p class="album" id="album"></p>
+
+        <div class="progress">
+          <div class="bar"><div class="fill" id="fill"></div></div>
+          <div class="times">
+            <span id="elapsed">0:00</span>
+            <span class="remaining" id="remaining">-0:00</span>
+          </div>
+        </div>
+
+        <div class="controls" id="controls">
+          <button type="button" data-action="prev" aria-label="Canción anterior">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <!-- Bar then a triangle whose apex is on the LEFT: |◀ -->
+              <path d="M6 5h2v14H6zm3.5 7 9-7v14z"/>
+            </svg>
+          </button>
+          <button type="button" class="play" data-action="toggle" aria-label="Reproducir o pausar">
+            <svg class="glyph-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7 4h3.5v16H7zm6.5 0H17v16h-3.5z"/>
+            </svg>
+            <svg class="glyph-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7 4l13 8-13 8z"/>
+            </svg>
+          </button>
+          <button type="button" data-action="next" aria-label="Canción siguiente">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <!-- Apex on the RIGHT, then the bar: ▶| — the mirror of `prev`, not a rotation of it.
+                   This was `M5.5 12l9 7V5z`, which drew the apex on the *left*: both transport
+                   arrows pointed backwards, and the mistake is invisible in a diff because the
+                   path is different, valid, and still draws a triangle. -->
+              <path d="M16 5h2v14h-2zM5.5 5l9 7-9 7z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+"use strict";
+const q = new URLSearchParams(location.search);
+const body = document.body;
+const root = document.documentElement;
+
+/* ── The overlay registry ───────────────────────────────────────────────────────────────────────
+   One entry per overlay, and the ONLY place a base size is written. The CSS reads `--base-w` and
+   `--base-h`, which `apply()` below sets from here, so a size cannot drift between the two. */
+const OVERLAYS = {
+  "sleeve-wide":  { name: "Sleeve",  variant: "horizontal", w: 620, h: 200 },
+  "sleeve-tall":  { name: "Sleeve",  variant: "vertical",   w: 380, h: 430 },
+  "playout-wide": { name: "Playout", variant: "horizontal", w: 760, h: 222 },
+  "playout-tall": { name: "Playout", variant: "vertical",   w: 380, h: 430 },
+  "vinyl-wide":   { name: "Vinyl",   variant: "horizontal", w: 680, h: 230 },
+  "vinyl-tall":   { name: "Vinyl",   variant: "vertical",   w: 400, h: 470 }
+};
+/* The first version shipped three ids and adapted them with a media query. Those links still work,
+   and they land on the horizontal variant, which is what they used to render on a wide canvas. */
+const ALIASES = { sleeve: "sleeve-wide", playout: "playout-wide", vinyl: "vinyl-wide" };
+
+const wanted = (q.get("design") || "sleeve-wide").toLowerCase();
+const id = OVERLAYS[wanted] ? wanted : (ALIASES[wanted] || "sleeve-wide");
+const spec = OVERLAYS[id];
+
+body.dataset.design = id;
+body.dataset.pos = (q.get("pos") || "bl").toLowerCase();
+if (q.get("idle") === "show") body.dataset.idle = "show";
+if (q.get("backdrop")) body.dataset.backdrop = q.get("backdrop").toLowerCase();
+if (q.get("scale")) root.style.setProperty("--scale", q.get("scale"));
+
+root.style.setProperty("--base-w", spec.w + "px");
+root.style.setProperty("--base-h", spec.h + "px");
+
+/* The scale origin has to follow the anchor, or a bottom-right overlay grows off-canvas. */
+const pos = body.dataset.pos;
+root.style.setProperty("--origin",
+  (pos[0] === "t" ? "top" : pos[0] === "m" ? "center" : "bottom") + " " +
+  (pos[1] === "l" ? "left" : pos[1] === "c" ? "center" : "right"));
+
+/* Nine of these open at once are otherwise indistinguishable in the title bar and the taskbar. */
+document.title = spec.name + " · " + spec.variant + " · " + spec.w + "×" + spec.h + " · LiMusic";
+
+/* ── The one thing that reacts to the container ────────────────────────────────────────────────
+   `min(w/bw, h/bh)` scales the fixed box so it fits, uniformly. Nothing inside is touched: the
+   composition, the proportions and the aspect ratio are all consequences of that single number.
+   Setting the browser source to the base size evaluates to exactly 1. */
+function fit() {
+  const s = Math.min(window.innerWidth / spec.w, window.innerHeight / spec.h);
+  root.style.setProperty("--fit", String(s));
+}
+fit();
+window.addEventListener("resize", fit);
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   THE LOOK — card mode, preset, and the knobs on top
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/** Named bundles, so nobody has to set eight options by hand to get a coherent overlay.
+ *  A preset only fills in what was not asked for explicitly — `?preset=glass&cardop=0.9` means
+ *  what it says. */
+const PRESETS = {
+  minimal: { card: "transparent", glow: 0,    shadow: 0,   border: 0 },
+  card:    { card: "solid",       glow: 0.25, shadow: 1,   border: 1, radius: 20 },
+  glass:   { card: "glass",       glow: 0.35, shadow: 1,   border: 1, radius: 20 },
+  dynamic: { card: "translucent", glow: 0.7,  shadow: 1,   border: 1, color: "dynamic" },
+  vinyl:   { card: "auto",        glow: 0.6,  shadow: 1,   border: 1 }
+};
+const preset = PRESETS[(q.get("preset") || "").toLowerCase()] || null;
+/** Explicit parameter, else the preset, else the design's own default. */
+const pick = (key, fallback) => (q.has(key) ? q.get(key) : (preset && key in preset ? preset[key] : fallback));
+const num = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
+
+const CARD = String(pick("card", "auto")).toLowerCase();
+body.dataset.card = ["auto", "transparent", "solid", "translucent", "glass"].includes(CARD)
+  ? CARD : "auto";
+/* What each surface suggests for the ambient glow. It is a suggestion and not a rule, because the
+   ambient light is painted *over* the card's own background — a `z-index: -1` pseudo-element still
+   paints above its element — so at full strength it tints whatever surface is chosen. On `auto`
+   that tint is the design and has to stay at 1; on a surface someone picked *because* they wanted
+   a solid dark background, a full-strength wash of the artwork's colour is the opposite of the
+   request. An explicit `cardglow` (or a preset) still wins. */
+const MODE_GLOW = { auto: 1, transparent: 1, solid: 0.15, translucent: 0.7, glass: 0.8 };
+const GLOW = Math.min(1, Math.max(0, num(pick("glow", MODE_GLOW[body.dataset.card] ?? 1),
+                                          MODE_GLOW[body.dataset.card] ?? 1)));
+const CARD_OP = Math.min(1, Math.max(0, num(pick("cardop", 0.88), 0.88)));
+const CARD_COLOR = String(pick("color", "neutral")).toLowerCase();
+
+/* Only the values that differ from the stylesheet are written, so `auto` stays exactly the design
+   that was measured and the CSS remains the single place the defaults live. */
+root.style.setProperty("--glow", String(GLOW));
+if (q.has("cardr")) root.style.setProperty("--card-radius", num(q.get("cardr"), 20) + "px");
+if (q.has("cardpad")) root.style.setProperty("--pad", num(q.get("cardpad"), 22) + "px");
+if (q.has("cardblur")) root.style.setProperty("--card-blur", Math.min(40, num(q.get("cardblur"), 20)) + "px");
+if (String(pick("border", "1")) === "0") root.style.setProperty("--card-edge", "1px solid transparent");
+if (String(pick("shadow", "1")) === "0") root.style.setProperty("--card-shadow", "none");
+/* `cardop` only means something for a surface that has an opacity to set — not for `auto`, whose
+   value belongs to the design. */
+if (q.has("cardop") || (preset && "opacity" in preset)) {
+  root.style.setProperty("--card-bg", "oklch(0.145 0.008 285 / " + (CARD_OP * 100).toFixed(0) + "%)");
+}
+
+const $ = (elId) => document.getElementById(elId);
+const el = { art: $("art"), cover: $("cover"), ring: $("ring"), title: $("title"),
+             titleText: $("titleText"), artist: $("artist"), artistText: $("artistText"),
+             album: $("album"), fill: $("fill"), elapsed: $("elapsed"), remaining: $("remaining") };
+
+/* Both endpoints live under the same token as the page, so they are derived from its own path
+   rather than written as absolute "/state" — which would 404 and leave the overlay blank. */
+const BASE = location.pathname.replace(/\/*$/, "/");
+const STATE_URL = BASE + "state";
+const CONTROL_URL = BASE + "control";
+const COVER_URL = BASE + "cover?";
+
+/** Motion timings, read from the stylesheet rather than repeated here: the tokens are the source of
+ *  truth, and a JS constant alongside them is a second copy waiting to drift. */
+const T = (() => {
+  const cs = getComputedStyle(root);
+  const ms = (name, d) => { const v = parseFloat(cs.getPropertyValue(name)); return Number.isFinite(v) ? v : d; };
+  return { text: ms("--dur-text", 300), art: ms("--dur-art", 440), swap: ms("--dur-swap", 620),
+           color: ms("--dur-color", 680) };
+})();
+const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const wait = (ms) => new Promise((r) => setTimeout(r, REDUCED ? 0 : ms));
+
+/* ── Artwork ───────────────────────────────────────────────────────────────────────────────────
+   When LiMusic serves the page, remote artwork goes through it rather than straight to Google, for
+   three reasons that all showed up as "the cover does not load": YouTube still returns
+   protocol-relative URLs (`//lh3.googleusercontent.com/…`) which resolve to `file://…` and fail
+   silently off a local page; an OBS source would otherwise depend on Google's hotlinking
+   behaviour; and it keeps the request on the machine that already holds the session.
+
+   Opened from disk, the proxy must NOT be used: the relative URL would resolve to a file next to
+   this one, which is a 404 the page cannot explain. */
+const PROXIED = location.protocol !== "file:";
+
+function coverSrc(raw) {
+  const t = (raw || "").trim();
+  if (!t) return "";
+  if (t.startsWith("//")) return PROXIED ? COVER_URL + encodeURIComponent("https:" + t) : "https:" + t;
+  if (/^https?:/i.test(t)) return PROXIED ? COVER_URL + encodeURIComponent(t) : t;
+  return t;   // data: URLs (the generated demo art) are used as-is
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   COLOUR FROM THE ARTWORK
+
+   The design keeps its identity and its background. What the record lends it is an *accent*: the
+   progress fill, the vinyl ring, the eyebrow, the hairline around the cover, the glow. Everything
+   else stays exactly as designed, so legibility cannot depend on what someone is listening to.
+
+   Reading the pixels needs a canvas, and a canvas needs the image to be same-origin. In OBS it is:
+   the page and the artwork both come from LiMusic's loopback server. A cover fetched straight from
+   Google would taint the canvas and `getImageData` would throw — caught, not ignored: the
+   stylesheet's own crimson stays and nothing else moves.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+const DYNAMIC = q.get("dynamic") !== "0" && !q.get("accent");
+
+/** `[h, s, l]`, h in degrees, s and l in 0..1. */
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  if (d === 0) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+
+/** The stylesheet's own crimson, as HSL, so the tween has somewhere to return to. */
+const DEFAULT_ACCENT = [352, 0.62, 0.40];
+let accentNow = null;
+let accentRaf = 0;
+
+/**
+ * The most usable colour in the artwork, or `null` when there is not one.
+ *
+ * Throws if the canvas is tainted; the caller turns that into the fallback. Sampling at 32×32
+ * rather than at full size is deliberate — it averages out grain and JPEG noise for free, and it is
+ * a thousand times fewer pixels to walk. Runs once per cover, never per frame.
+ */
+function extractAccent(img) {
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, size, size);
+  const { data } = ctx.getImageData(0, 0, size, size);
+
+  // Bucket by hue and weight each pixel by how usable it would be as an accent.
+  const bins = new Map();
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 200) continue;
+    const [h, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+    // Near-black, near-white and near-grey: the first two have no room to be lifted into a usable
+    // accent, and greys carry a hue value that means nothing. Averaging them in is how this ends up
+    // returning mud.
+    if (l < 0.14 || l > 0.9 || s < 0.2) continue;
+    const w = s * (1 - Math.abs(l - 0.5) * 1.4);
+    if (w <= 0) continue;
+    const key = Math.round(h / 30) % 12;
+    const bin = bins.get(key) ?? { w: 0, h: 0, s: 0, l: 0 };
+    bin.w += w; bin.h += h * w; bin.s += s * w; bin.l += l * w;
+    bins.set(key, bin);
+  }
+  if (!bins.size) return null;
+
+  let best = null;
+  for (const bin of bins.values()) if (!best || bin.w > best.w) best = bin;
+
+  // Corrected before use, and the band is the whole point: under 0.60 lightness the accent stops
+  // reading as a colour on a near-black plate, over 0.75 it stops reading as an *accent* and starts
+  // competing with the title. Saturation is floored too — a washed-out cover should still give the
+  // progress bar something to be.
+  return [
+    best.h / best.w,
+    Math.min(0.82, Math.max(0.5, (best.s / best.w) * 1.15)),
+    Math.min(0.75, Math.max(0.6, best.l / best.w))
+  ];
+}
+
+const accentCss = (a) => `hsl(${a[0].toFixed(1)} ${(a[1] * 100).toFixed(1)}% ${(a[2] * 100).toFixed(1)}%)`;
+
+/** Shortest way round the wheel, so a red-to-blue change passes through magenta rather than
+ *  sweeping back through green. This is what makes the palette change read as a blend. */
+function lerpHue(a, b, t) {
+  const d = ((b - a + 540) % 360) - 180;
+  return (a + d * t + 360) % 360;
+}
+
+/**
+ * Move the accent to a new colour over `--dur-color`, rather than switching it.
+ *
+ * A jump is the one thing that makes dynamic colour look cheap: the bar, the ring and every glow
+ * change in the same frame as the artwork. Tweening also means the palette change is *inside* the
+ * track-change sequence rather than an event that happens during it.
+ *
+ * The tween runs only while a change is in flight — never on a timer, never per frame while idle.
+ */
+function accentTo(target) {
+  const to = target || DEFAULT_ACCENT;
+  const from = accentNow || DEFAULT_ACCENT;
+  accentNow = to;
+  cancelAnimationFrame(accentRaf);
+  if (REDUCED) { root.style.setProperty("--accent", accentCss(to)); return; }
+  const t0 = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / T.color);
+    const e = 1 - Math.pow(1 - k, 3);
+    root.style.setProperty("--accent", accentCss([
+      lerpHue(from[0], to[0], e),
+      from[1] + (to[1] - from[1]) * e,
+      from[2] + (to[2] - from[2]) * e
+    ]));
+    if (k < 1) accentRaf = requestAnimationFrame(step);
+  };
+  accentRaf = requestAnimationFrame(step);
+}
+
+/** `null` restores the stylesheet's accent; `--accent-ink` and `--accent-soft` follow it, and so
+ *  does everything they feed. */
+function applyAccent(hsl) {
+  if (!hsl) { accentTo(null); return; }
+  accentTo(hsl);
+  console.debug("overlay: accent from artwork", accentCss(hsl));
+  // A surface derived from the record is only offered where it belongs: a solid card in `dynamic`
+  // mode. It is pushed almost to black on purpose — vivid colour belongs in the accents.
+  if (CARD_COLOR === "dynamic" && body.dataset.card === "solid") {
+    root.style.setProperty("--card-bg", `hsl(${hsl[0].toFixed(0)} 30% 9%)`);
+  }
+}
+
+/* Sample data, overridable from the URL so a real track can be dropped in without rebuilding the
+   app that embeds this file. The artwork is generated when `dc` is absent, so the plain demo needs
+   no network at all. */
+const DEMO = {
+  videoId: q.get("dv") || "demo",
+  title: q.get("dt") || "Higher Ground",
+  artists: q.get("da") || "Nova Sky",
+  album: q.get("dal") || "Night Signals",
+  thumbnail: q.get("dc") || null,
+  duration: Number(q.get("ddur")) || 214,
+  position: Number(q.get("dpos")) || 78,
+  paused: false
+};
+const DEMO_ART = "data:image/svg+xml;utf8," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">' +
+  '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+  '<stop offset="0" stop-color="#2a1f3d"/><stop offset="0.5" stop-color="#b8395a"/>' +
+  '<stop offset="1" stop-color="#f0a03c"/></linearGradient></defs>' +
+  '<rect width="300" height="300" fill="url(#g)"/>' +
+  '<circle cx="150" cy="150" r="70" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2"/>' +
+  '</svg>'
+);
+
+let state = null;                                 // last snapshot from Rust
+let shownId = null;                               // which track the DOM currently shows
+let anchor = { pos: 0, at: performance.now() };   // for interpolating between polls
+let booted = false;                               // has the entrance played?
+
+function fmt(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+/**
+ * A duration, in seconds, from either shape LiMusic publishes it in.
+ *
+ * `/state` carries it twice: `now.duration` is the *formatted* string the app shows ("4:03") and
+ * `state.duration` is the number of seconds (242.401). The progress code used to read
+ * `track.duration || state.duration`, and because a non-empty string is truthy the formatted one
+ * won — after which `"4:03" > 0` coerces to NaN, the comparison is false, and the bar sat at zero
+ * with `-0:00` beside it for the whole song.
+ *
+ * It never showed up in the demo because the sample data's duration is a plain number. It took
+ * running against the real server to see it, which is the whole argument for running against the
+ * real server.
+ */
+function seconds(v) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.includes(":")) {
+    const parts = v.split(":").map(Number);
+    if (parts.every((n) => Number.isFinite(n))) return parts.reduce((acc, n) => acc * 60 + n, 0);
+  }
+  return 0;
+}
+
+/** Cross-fade the cover: a src swap repaints a blank frame otherwise, which reads as a flash. */
+function setCover(raw) {
+  const url = coverSrc(raw);
+  if (url === el.cover.dataset.src) return;
+  el.cover.dataset.src = url;
+  if (!url) { el.art.classList.remove("has-art"); body.classList.remove("has-art"); return; }
+  el.cover.classList.add("swapping");
+  const next = new Image();
+  next.onload = next.onerror = () => {
+    // `onerror` lands here too, which is the point: a cover that cannot be fetched leaves the
+    // music note rather than an empty square — and the src is dropped, or the browser paints its
+    // own broken-image glyph on top of that note.
+    const ok = next.naturalWidth > 0;
+    if (ok) {
+      el.cover.src = url;
+      root.style.setProperty("--cover", 'url("' + url + '")');
+    } else {
+      el.cover.removeAttribute("src");
+      console.warn("overlay: cover failed to load", url);
+    }
+    el.cover.classList.remove("swapping");
+    el.art.classList.toggle("has-art", ok);
+    body.classList.toggle("has-art", ok);
+    // The accent is refreshed on every cover, including on failure — where it has to go *back* to
+    // the default rather than keep the colour of the track before.
+    if (DYNAMIC) {
+      if (ok) {
+        try { applyAccent(extractAccent(next)); } catch (e) { applyAccent(null); }
+      } else {
+        applyAccent(null);
+      }
+    }
+  };
+  next.src = url;
+}
+
+/**
+ * Long titles.
+ *
+ * A clipped title with an ellipsis is honest but loses the end of the name, and a song title is
+ * exactly the thing a viewer is trying to read. The marquee only starts when the text genuinely
+ * overflows, and the duration is derived from the distance so a slightly-too-long title and a very
+ * long one scroll at the same speed instead of the long one racing.
+ */
+function fitMarquee(box, inner) {
+  box.classList.remove("marquee");
+  const over = inner.scrollWidth - box.clientWidth;
+  if (over <= 2) return;
+  box.style.setProperty("--shift", -over + "px");
+  // 30px/s, plus the rests at each end, gives a duration that reads as a drift rather than a scroll.
+  box.style.setProperty("--marquee-dur", (over / 30 + 5).toFixed(1) + "s");
+  box.classList.add("marquee");
+}
+
+/**
+ * Write the track into the DOM.
+ *
+ * Split out from the sequencing on purpose: this is the instant where the content changes, and the
+ * whole point of the sequence is that it never happens on a frame the viewer can see. The old
+ * content has already left by the time this runs, and the new content is still invisible.
+ */
+function paint(track) {
+  el.titleText.textContent = track.title || "—";
+  el.artistText.textContent = track.artists || "";
+  el.album.textContent = track.album || "";
+  setCover(track.thumbnail || (q.get("demo") === "1" ? DEMO_ART : ""));
+  // Measured after the text is in place and before the fade-in finishes, so the marquee is already
+  // set up when the title becomes visible.
+  fitMarquee(el.title, el.titleText);
+  fitMarquee(el.artist, el.artistText);
+}
+
+/* How long the outgoing half of a change takes, per design. The record needs the longest: it has to
+   be seen to slow down before it can leave, and cutting that short is what makes it look like a
+   cut. Everything else lands so the two halves total roughly `--dur-swap`. */
+const SWAP_OUT = {
+  "sleeve-wide": 170, "sleeve-tall": 190,
+  "playout-wide": 230, "playout-tall": 240,
+  "vinyl-wide": 330, "vinyl-tall": 330
+};
+
+let swapping = false;
+
+/**
+ * The sequence: out, change, in. Never the two at once, and never all of it in one frame.
+ *
+ * The DOM is only touched between the two halves, while the outgoing content is at opacity 0 — so
+ * there is no frame in which the old cover has gone and the new one has not arrived, which is the
+ * cut this replaced.
+ */
+async function swapTo(track) {
+  if (swapping) { paint(track); return; }   // two changes inside one sequence: update, don't queue
+  swapping = true;
+  body.classList.add("swap-out");
+  await wait(SWAP_OUT[id] ?? 200);
+  paint(track);
+  body.classList.remove("swap-out");
+  void body.offsetWidth;                    // force a reflow so `swap-in` starts a fresh animation
+  body.classList.add("swap-in");
+  await wait(T.swap);
+  body.classList.remove("swap-in");
+  swapping = false;
+}
+
+function current() {
+  return state && state.now ? state.now : (q.get("demo") === "1" ? DEMO : null);
+}
+
+function render() {
+  const track = current();
+  body.classList.toggle("idle", !track);
+  if (!track) { shownId = null; return; }
+  if (track.videoId !== shownId) {
+    const first = shownId === null;
+    shownId = track.videoId;
+    if (first) {
+      paint(track);
+      if (!booted) {
+        booted = true;
+        body.classList.add("boot");
+        setTimeout(() => body.classList.remove("boot"), T.swap);
+      }
+    } else {
+      swapTo(track);
+    }
+  }
+}
+
+function tick() {
+  const track = current();
+  const paused = state ? !!state.paused : (track ? !!track.paused : false);
+  body.classList.toggle("paused", paused);
+  if (track) {
+    // Seconds from the state first — it is the number. The per-track string is only a fallback.
+    const dur = seconds(state && state.duration) || seconds(track.duration);
+    // Interpolate locally: Rust pushes a position about four times a second, and a bar that only
+    // moves on the poll looks like it is stuttering.
+    const live = paused ? anchor.pos : anchor.pos + (performance.now() - anchor.at) / 1000;
+    const p = dur > 0 ? Math.min(1, live / dur) : 0;
+    // A seek is the one time the width jumps. Animating that single jump, and only that one, keeps
+    // the bar from teleporting without putting a transition under the rAF updates — which would
+    // make ordinary playback lag behind the music.
+    if (Math.abs(live - lastLive) > 1.5) {
+      el.fill.style.transition = "width 260ms cubic-bezier(0.16, 1, 0.3, 1)";
+      setTimeout(() => { el.fill.style.transition = "none"; }, 300);
+    }
+    lastLive = live;
+    el.fill.style.width = (p * 100).toFixed(2) + "%";
+    el.ring.style.setProperty("--p", p.toFixed(4));
+    el.elapsed.textContent = fmt(live);
+    el.remaining.textContent = dur > 0 ? "-" + fmt(dur - live) : "-0:00";
+  }
+  requestAnimationFrame(tick);
+}
+let lastLive = 0;
+
+/* ── The record ───────────────────────────────────────────────────────────────────────────────
+   A turntable winds down and winds back up; `animation-play-state: paused` stopped the disc dead,
+   and a record that freezes mid-turn reads as a broken image rather than a paused one. The speed is
+   eased toward the play state, so pause takes about a second to come to rest and play about a
+   second to get going.
+
+   The same mechanism gives the track change its physicality: while a swap is in flight the target
+   speed drops, so the record is visibly slowing as it leaves and still gathering speed as the new
+   one settles. That is why this is driven from JS rather than by a CSS animation.
+   */
+let spinDeg = 0, spinSpeed = 0, spinPrev = performance.now();
+function spinTick(now) {
+  const dt = Math.min(0.05, (now - spinPrev) / 1000);
+  spinPrev = now;
+  const target = body.classList.contains("paused") || swapping ? 0 : 1;
+  spinSpeed += (target - spinSpeed) * Math.min(1, dt * (swapping ? 3.2 : 2.2));
+  // Stop writing once it has effectively stopped, rather than setting a property 60 times a second
+  // on a paused overlay for the rest of the stream.
+  if (spinSpeed > 0.002 || target === 1) {
+    spinDeg = (spinDeg + spinSpeed * (360 / 22) * dt) % 360;
+    root.style.setProperty("--spin", spinDeg.toFixed(2) + "deg");
+  }
+  requestAnimationFrame(spinTick);
+}
+
+async function poll() {
+  if (q.get("demo") === "1") { render(); return; }
+  try {
+    const r = await fetch(STATE_URL, { cache: "no-store" });
+    if (!r.ok) throw new Error(String(r.status));
+    state = await r.json();
+    anchor = { pos: state.position || 0, at: performance.now() };
+    render();
+  } catch (e) {
+    // LiMusic closed, or the overlay outlived it. Blank rather than stale: a frozen song title on
+    // a live stream is worse than nothing.
+    body.classList.add("idle");
+  }
+}
+
+/* Real controls, not decoration. They work from OBS's "Interact" window; on stream nobody can
+   click them, which is exactly why they must not pretend. */
+$("controls").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (q.get("demo") === "1") {
+    if (action === "toggle") body.classList.toggle("paused");
+    return;
+  }
+  try {
+    const r = await fetch(CONTROL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action })
+    });
+    if (!r.ok) throw new Error(String(r.status));
+    if (action !== "toggle") setTimeout(poll, 120);
+  } catch (e) { /* LiMusic is gone; the next poll fades the overlay out. */ }
+});
+
+poll();
+setInterval(poll, 1000);
+requestAnimationFrame(tick);
+// Only the two vinyl overlays have a record, and a reduced-motion request means no ambient spin at
+// all — so on those, the loop is never started rather than started and then fought with.
+if (!REDUCED && id.startsWith("vinyl")) requestAnimationFrame(spinTick);
+</script>
+</body>
+</html>

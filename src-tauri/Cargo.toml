@@ -35,7 +35,11 @@ rustypipe-botguard = "0.1.2"
 base64 = "0.22"
 regex = "1"
 urlencoding = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "stream"] }
+# `json` was reaching us only through feature unification with another crate in the graph — nothing
+# here asked for it, and `lastfm.rs` (`resp.json()`) and the Twitch Helix client (`.json(&body)`)
+# both need it. Declaring it costs nothing (the code is already compiled in) and stops a dependency
+# bump from removing a feature two modules silently depend on.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "stream", "json"] }
 # Loopback HTTP server for the music-video proxy (videoproxy.rs). Already in the tree behind
 # reqwest, so this pins nothing new; WebKitGTK's media backend will only load http/https/blob.
 hyper = { version = "1", features = ["server", "http1"] }
