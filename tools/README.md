@@ -52,10 +52,46 @@ work on the overlay without rebuilding the app: the real server embeds every fil
 |---|---|
 | `/` | the overlay, with the same query parameters the real server takes |
 | `/switch` | the switcher: real songs from the database, plus the look controls |
+| `/audit` | the legibility bench — the overlay over six backdrops |
 | `/version` | a timestamp, which is what the reload poll reads |
 
 Only the shared stylesheet, the six design sheets and the script are served, by name from an
 allowlist — the same reasoning as the token on the real server, one order of magnitude simpler.
+
+### The legibility bench
+
+`/audit` frames the overlay over six backdrops — light, dark, busy, a gameplay still, a bright one,
+and one the same colour as the plate. It exists because "can you read this" is not a question a
+stylesheet answers: a 12px line at 68% opacity is fine on a dark scene and gone on a light one.
+
+It used to load the page off `file://` with an absolute path to one machine's checkout. That stopped
+working the moment the page was split — a `file://` load of the shell alone has no CSS — and it was
+never going to work on a second machine. It resolves the overlay against wherever the bench is
+served from now.
+
+### Building the app
+
+```sh
+cd ui && pnpm install && pnpm build     # the UI first
+cd .. && cargo build -p limusic-app     # then the app
+```
+
+**On Windows this needs `mpv.lib`, which is not in the repo.** It is a link-time import library for
+`libmpv-2.dll`, and the established way to get one is to generate it from the DLL's exports:
+
+```sh
+# a .def from the DLL's export table, then:
+lib /def:mpv.def /name:libmpv-2.dll /out:mpv.lib /machine:x64
+```
+
+Then point the build at the directory holding both:
+
+```sh
+$env:RUSTFLAGS="-L native=<dir>"; $env:PATH="<dir>;$env:PATH"; cargo build -p limusic-app
+```
+
+None of this is needed for `tools/verify` or the dev server, which is everything the overlay work
+touches. It is only needed for a build that OBS can point at.
 
 ## `make-switcher.py` — regenerate the switcher
 
