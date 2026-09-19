@@ -62,11 +62,19 @@ body[data-design^="playout"] .controls {
   100% { opacity: 0;   transform: translateX(100%); }
 }
 
-body[data-design^="playout"].swap-out .art {
+/* The clip is on the **image**, not on the band, and that is the whole fix for the white square.
+ *
+ * It was on `.art`, which meant the element clipped itself — including its own background. So the
+ * previous cover could not be held underneath it, because "underneath it" was also inside the clip:
+ * the wipe cut away the band and the pinned background together, and the hole showed the scene.
+ *
+ * On the image, the band is never clipped. What the edge uncovers is the band's own background, which
+ * the script fills with the cover that is leaving. Which is what a wipe is supposed to do. */
+body[data-design^="playout"].swap-out .art img {
   animation: playout-art-out var(--dur-exit-art) var(--ease-soft) both;
 }
 
-body[data-design^="playout"].swap-in .art {
+body[data-design^="playout"].swap-in .art img {
   animation: playout-art-in var(--dur-art) var(--ease-out) both;
 }
 
