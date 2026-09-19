@@ -26,7 +26,18 @@ export const twitch = $state<TwitchSnapshot>({
 		version: 1,
 		channelLogin: null,
 		channelId: null,
-		autoConnect: false
+		autoConnect: false,
+		// Phase 3, inert until switched on — mirrors `TwitchConfig::default()` in Rust. A mismatch
+		// here is a panel that renders before the first snapshot arrives and shows the wrong thing
+		// for one frame, which is exactly the kind of thing nobody reports as a bug.
+		requestsEnabled: false,
+		commandPrefix: '!',
+		requestAliases: ['sr', 'songrequest', 'request'],
+		minRole: 'everyone',
+		userCooldownSecs: 30,
+		globalCooldownSecs: 5,
+		rewardId: '',
+		replyInChat: true
 	},
 	scopes: [],
 	expiresAt: 0,

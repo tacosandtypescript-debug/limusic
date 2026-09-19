@@ -127,6 +127,129 @@ pub fn matches_reward(reward_id: &str, configured: &str) -> bool {
     !configured.is_empty() && reward_id.eq_ignore_ascii_case(configured)
 }
 
+/// One of the channel's Channel Points rewards, as the picker needs it.
+///
+/// The id is what gets stored and matched; the title is what the streamer recognises. Both are
+/// carried because a settings panel showing only a UUID is not a settings panel.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reward {
+    pub id: String,
+    pub title: String,
+    pub cost: i64,
+    /// Whether it is currently redeemable. A paused reward can still be chosen and will simply never
+    /// fire, which is worth showing rather than hiding: the streamer paused it, they did not delete
+    /// it.
+    pub enabled: bool,
+}
+
+/// A row of the rewards *list*, which is a different shape from the `reward` object nested inside a
+/// redemption: this one carries `is_enabled` and no prompt, and the other carries a prompt and no
+/// enabled flag. Two types rather than one with everything optional, because a reward that cannot be
+/// redeemed and a redemption's reward are not the same thing.
+#[derive(Debug, serde::Deserialize)]
+struct RawRewardRow {
+    id: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    cost: i64,
+    #[serde(default)]
+    is_enabled: bool,
+}
+
+/// Read `GET /helix/channel_points/custom_rewards` into the list the picker shows.
+///
+/// Pure and separate from the request that fetches it, so the shape of Twitch's answer is pinned
+/// without a token. A reward with no id is dropped rather than kept with an empty one: an entry that
+/// cannot be matched is worse than an absent one, because choosing it would look like it worked.
+pub fn parse_rewards(body: &Value) -> Vec<Reward> {
+    body.get("data")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| serde_json::from_value::<RawRewardRow>(row.clone()).ok())
+                .filter(|r| !r.id.trim().is_empty())
+                .map(|r| Reward {
+                    id: r.id,
+                    title: if r.title.trim().is_empty() {
+                        "Untitled reward".to_string()
+                    } else {
+                        r.title
+                    },
+                    cost: r.cost,
+                    enabled: r.is_enabled,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_reward_list_is_read() {
+        let body = json!({
+            "data": [
+                { "id": "a", "title": "Song Request", "cost": 250, "is_enabled": true },
+                { "id": "b", "title": "Hydrate", "cost": 50, "is_enabled": false },
+            ]
+        });
+        let list = parse_rewards(&body);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, "a");
+        assert_eq!(list[0].title, "Song Request");
+        assert_eq!(list[0].cost, 250);
+        assert!(list[0].enabled);
+        assert!(!list[1].enabled, "a paused reward is still listed");
+    }
+
+    /// Every shape that is not a usable list yields an empty one rather than a panic. The panel
+    /// shows "no rewards" for all of them, which is the truth.
+    #[test]
+    fn a_broken_answer_yields_nothing() {
+        for body in [
+            json!({}),
+            json!({ "data": null }),
+            json!({ "data": "not an array" }),
+            json!({ "data": [] }),
+            json!([]),
+            json!(null),
+        ] {
+            assert!(parse_rewards(&body).is_empty(), "{body}");
+        }
+    }
+
+    /// A reward with no id cannot be matched against a redemption, so it is dropped rather than
+    /// offered as a choice that would never work.
+    #[test]
+    fn rewards_without_an_id_are_dropped() {
+        let body = json!({
+            "data": [
+                { "id": "", "title": "Broken" },
+                { "id": "   ", "title": "Also broken" },
+                { "title": "No id at all" },
+                { "id": "good", "title": "Fine", "cost": 100, "is_enabled": true },
+            ]
+        });
+        let list = parse_rewards(&body);
+        assert_eq!(list.len(), 1, "{list:?}");
+        assert_eq!(list[0].id, "good");
+    }
+
+    /// A reward the streamer never titled still needs a row somebody can click.
+    #[test]
+    fn an_untitled_reward_is_still_listed() {
+        let list = parse_rewards(&json!({ "data": [{ "id": "x", "is_enabled": true }] }));
+        assert_eq!(list.len(), 1);
+        assert!(!list[0].title.is_empty(), "an empty title renders as a blank row");
+        assert_eq!(list[0].cost, 0, "and a missing cost is zero, not a panic");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

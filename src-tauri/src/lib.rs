@@ -723,6 +723,8 @@ pub fn run() {
             twitch::commands::tw_connect,
             twitch::commands::tw_cancel,
             twitch::commands::tw_disconnect,
+            twitch::commands::tw_rewards,
+            twitch::commands::tw_set_requests,
             twitch::commands::tw_set_channel,
             commands::get_lyrics,
             commands::lastfm_connect,

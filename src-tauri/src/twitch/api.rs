@@ -272,6 +272,30 @@ impl<'a> Helix<'a> {
         .await
     }
 
+    /// `GET /helix/channel_points/custom_rewards` — the channel's rewards, for the picker.
+    ///
+    /// `only_manageable_rewards=false`, and that is the whole point of the call. The default is
+    /// `true`, which returns only the rewards *this client can manage* — the ones it created. A
+    /// streamer's existing "Song Request" reward, made by hand in the Twitch dashboard, would not
+    /// appear in the list at all, and finding that one is exactly what the picker is for.
+    ///
+    /// 403 here means the channel is not an affiliate or partner. That is not retryable and the
+    /// panel already has `channel_points_available` to say so, so the error is passed through
+    /// rather than dressed up.
+    pub async fn list_rewards(
+        &self,
+        broadcaster_id: &str,
+    ) -> Result<Vec<super::rewards::Reward>, HelixError> {
+        let url = format!(
+            "{HELIX}/channel_points/custom_rewards?broadcaster_id={}&only_manageable_rewards=false",
+            urlencoding::encode(broadcaster_id)
+        );
+        let text = self.send(|| self.authed(self.http.get(&url))).await?;
+        let body: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| HelixError::Transport(format!("Twitch sent an unexpected reply: {e}")))?;
+        Ok(super::rewards::parse_rewards(&body))
+    }
+
     /// `POST /helix/chat/messages` — say something in the channel.
     ///
     /// **A 200 does not mean it was sent.** Twitch answers `is_sent: false` with a `drop_reason`

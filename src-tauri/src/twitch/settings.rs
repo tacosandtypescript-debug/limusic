@@ -179,6 +179,256 @@ impl TwitchConfig {
     }
 }
 
+/// What the Settings panel sends when the phase 3 options are saved.
+///
+/// A whole struct rather than eight commands: the panel has all of it on screen at once, and saving
+/// one field at a time would let a half-applied state exist — the reward set but requests still off,
+/// or a cooldown of zero that the user thought they had changed.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestSettings {
+    pub enabled: bool,
+    pub prefix: String,
+    pub aliases: Vec<String>,
+    pub min_role: String,
+    pub user_cooldown_secs: u64,
+    pub global_cooldown_secs: u64,
+    pub reward_id: String,
+    pub reply_in_chat: bool,
+}
+
+/// The longest a command prefix may be.
+///
+/// Not a technical limit — `chat.rs` handles multi-character prefixes — but a practical one: at some
+/// length it stops being a prefix and starts being a word, and every message beginning with that
+/// word becomes a request.
+const MAX_PREFIX_CHARS: usize = 3;
+/// Plenty for `sr`, `songrequest`, `request` and a translation or two.
+const MAX_ALIASES: usize = 8;
+/// An hour. A cooldown longer than that is a closed queue with extra steps, and `enabled: false`
+/// says it better.
+const MAX_COOLDOWN_SECS: u64 = 3600;
+
+impl TwitchConfig {
+    /// Apply the phase 3 options, refusing anything that would store a rule nobody meant.
+    ///
+    /// This is where a typo is caught. `min_role` is a string in the file and a `Role` in the code,
+    /// and a misspelling that was stored would read back as `None` — which the session resolves to
+    /// `Everyone`, turning a strict channel permissive. Refusing at the door is the only place that
+    /// can be prevented, because by the time it is read back the intent is gone.
+    ///
+    /// Pure, so all of it is tested without a session.
+    pub fn apply_requests(&mut self, patch: RequestSettings) -> Result<(), String> {
+        let prefix = patch.prefix.trim().to_string();
+        if patch.enabled && prefix.is_empty() {
+            return Err(
+                "A command needs a prefix: with none, every message in chat would be one.".into()
+            );
+        }
+        if prefix.chars().count() > MAX_PREFIX_CHARS {
+            return Err(format!("The prefix can be at most {MAX_PREFIX_CHARS} characters."));
+        }
+        if prefix.chars().any(char::is_whitespace) {
+            return Err("A prefix cannot contain a space.".into());
+        }
+
+        let mut aliases: Vec<String> = Vec::new();
+        for raw in &patch.aliases {
+            let name = raw.trim().trim_start_matches(&prefix).trim().to_ascii_lowercase();
+            if name.is_empty() {
+                continue;
+            }
+            if name.chars().any(char::is_whitespace) {
+                return Err(format!("`{raw}` is not a command name: it contains a space."));
+            }
+            if !aliases.contains(&name) {
+                aliases.push(name);
+            }
+        }
+        if patch.enabled && aliases.is_empty() {
+            return Err("Name at least one command, e.g. `sr`.".into());
+        }
+        if aliases.len() > MAX_ALIASES {
+            return Err(format!("At most {MAX_ALIASES} command names."));
+        }
+
+        let role = super::permissions::Role::parse(&patch.min_role).ok_or_else(|| {
+            format!(
+                "`{}` is not a role. Use one of: everyone, subscriber, vip, moderator, broadcaster.",
+                patch.min_role.trim()
+            )
+        })?;
+
+        if patch.user_cooldown_secs > MAX_COOLDOWN_SECS
+            || patch.global_cooldown_secs > MAX_COOLDOWN_SECS
+        {
+            return Err(format!("A cooldown can be at most {MAX_COOLDOWN_SECS} seconds."));
+        }
+
+        self.requests_enabled = patch.enabled;
+        self.command_prefix = prefix;
+        self.request_aliases = aliases;
+        // Stored as `parse` accepts it, so the file and the code agree on the spelling.
+        self.min_role = role.label().to_string();
+        self.user_cooldown_secs = patch.user_cooldown_secs;
+        self.global_cooldown_secs = patch.global_cooldown_secs;
+        self.reward_id = patch.reward_id.trim().to_string();
+        self.reply_in_chat = patch.reply_in_chat;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod request_settings_tests {
+    use super::*;
+
+    fn patch() -> RequestSettings {
+        RequestSettings {
+            enabled: true,
+            prefix: "!".into(),
+            aliases: vec!["sr".into(), "songrequest".into()],
+            min_role: "everyone".into(),
+            user_cooldown_secs: 30,
+            global_cooldown_secs: 5,
+            reward_id: "abc-123".into(),
+            reply_in_chat: true,
+        }
+    }
+
+    #[test]
+    fn a_good_patch_is_stored() {
+        let mut c = TwitchConfig::default();
+        c.apply_requests(patch()).unwrap();
+        assert!(c.requests_enabled);
+        assert_eq!(c.command_prefix, "!");
+        assert_eq!(c.request_aliases, vec!["sr", "songrequest"]);
+        assert_eq!(c.min_role, "everyone");
+        assert_eq!(c.user_cooldown_secs, 30);
+        assert_eq!(c.reward_id, "abc-123");
+        assert!(c.reply_in_chat);
+    }
+
+    /// The one that matters most. A misspelt role stored as-is reads back as `None`, and the session
+    /// resolves `None` to `Everyone` — so a channel that asked for subscribers would quietly open
+    /// its queue to the channel. Refusing here is the only place it can be caught.
+    #[test]
+    fn a_misspelt_role_is_refused() {
+        let mut c = TwitchConfig::default();
+        let err = c.apply_requests(RequestSettings { min_role: "moderater".into(), ..patch() });
+        assert!(err.is_err(), "a typo must not be stored");
+        assert!(err.unwrap_err().contains("moderater"), "and the message names it");
+        // Nothing was applied.
+        assert!(!c.requests_enabled);
+    }
+
+    /// Roles are stored in the spelling `parse` accepts, so the file and the code agree. The panel
+    /// may send `MOD` or `subs`; what lands on disk is the canonical word.
+    #[test]
+    fn a_role_is_stored_canonically() {
+        for (sent, want) in [
+            ("MOD", "moderator"),
+            ("subs", "subscriber"),
+            ("  vip  ", "vip"),
+            ("streamer", "broadcaster"),
+        ] {
+            let mut c = TwitchConfig::default();
+            c.apply_requests(RequestSettings { min_role: sent.into(), ..patch() }).unwrap();
+            assert_eq!(c.min_role, want, "sent {sent:?}");
+        }
+    }
+
+    /// An empty prefix with requests on is refused, because `chat.rs` resolves an empty prefix to
+    /// "no commands at all" — so the panel would show requests enabled and nothing would ever fire.
+    #[test]
+    fn an_empty_prefix_is_refused_while_enabled() {
+        let mut c = TwitchConfig::default();
+        assert!(c.apply_requests(RequestSettings { prefix: "   ".into(), ..patch() }).is_err());
+        // But switching requests off with no prefix is a coherent state.
+        assert!(c
+            .apply_requests(RequestSettings { enabled: false, prefix: String::new(), ..patch() })
+            .is_ok());
+    }
+
+    /// Aliases arrive as the panel typed them: with the prefix on, in mixed case, duplicated, or
+    /// with blanks. All four are normalised rather than rejected — they are the same command.
+    #[test]
+    fn aliases_are_normalised_and_deduplicated() {
+        let mut c = TwitchConfig::default();
+        c.apply_requests(RequestSettings {
+            prefix: "!".into(),
+            aliases: vec![
+                "!SR".into(),
+                " sr ".into(),
+                "SongRequest".into(),
+                "".into(),
+                "   ".into(),
+                "songrequest".into(),
+            ],
+            ..patch()
+        })
+        .unwrap();
+        assert_eq!(c.request_aliases, vec!["sr", "songrequest"]);
+    }
+
+    /// Asking for requests with nothing to type is refused: the feature would be on and unreachable.
+    #[test]
+    fn no_command_names_is_refused_while_enabled() {
+        let mut c = TwitchConfig::default();
+        assert!(c
+            .apply_requests(RequestSettings { aliases: vec!["".into(), "  ".into()], ..patch() })
+            .is_err());
+        assert!(c
+            .apply_requests(RequestSettings { enabled: false, aliases: vec![], ..patch() })
+            .is_ok());
+    }
+
+    /// Everything is bounded, and the bounds are what stop a prefix that is really a word and a
+    /// cooldown that is really a closed queue.
+    #[test]
+    fn the_bounds_hold() {
+        let mut c = TwitchConfig::default();
+        assert!(c.apply_requests(RequestSettings { prefix: "!!!!!".into(), ..patch() }).is_err());
+        assert!(
+            c.apply_requests(RequestSettings { prefix: "a b".into(), ..patch() }).is_err(),
+            "a prefix with a space is not a prefix"
+        );
+        assert!(c
+            .apply_requests(RequestSettings {
+                aliases: (0..20).map(|i| format!("c{i}")).collect(),
+                ..patch()
+            })
+            .is_err());
+        assert!(c.apply_requests(RequestSettings { user_cooldown_secs: 9999, ..patch() }).is_err());
+        // And at the edges it is accepted, so the bound is not off by one.
+        assert!(c
+            .apply_requests(RequestSettings {
+                prefix: "!!!".into(),
+                aliases: vec!["sr".into()],
+                user_cooldown_secs: 3600,
+                global_cooldown_secs: 3600,
+                ..patch()
+            })
+            .is_ok());
+    }
+
+    /// A rejected patch leaves the config exactly as it was, so a bad save cannot half-apply.
+    #[test]
+    fn a_refused_patch_changes_nothing() {
+        let mut c = TwitchConfig::default();
+        c.apply_requests(patch()).unwrap();
+        let before = c.clone();
+        assert!(c
+            .apply_requests(RequestSettings {
+                aliases: vec!["sr".into()],
+                min_role: "nonsense".into(),
+                user_cooldown_secs: 99,
+                ..patch()
+            })
+            .is_err());
+        assert_eq!(c, before, "the cooldown must not have moved either");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -70,7 +70,7 @@ pub mod requests;
 pub mod rewards;
 
 pub use api::{Helix, HelixError, TwitchUser};
-pub use settings::TwitchConfig;
+pub use settings::{RequestSettings, TwitchConfig};
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1192,6 +1192,50 @@ impl TwitchSession {
         // the user just replaced.
         self.stop_events().await;
         self.start_events_if_ready().await;
+        Ok(())
+    }
+
+    /// The channel's Channel Points rewards, for the Settings picker.
+    pub async fn rewards(self: &Arc<Self>) -> Result<Vec<rewards::Reward>, String> {
+        let token = self.access_token().await?;
+        let (client_id, broadcaster) = {
+            let inner = self.inner.lock().await;
+            let broadcaster = inner.config.channel_id.clone().ok_or("Choose a channel first.")?;
+            (inner.client_id.clone(), broadcaster)
+        };
+        api::Helix::new(self.http(), &client_id, &token)
+            .list_rewards(&broadcaster)
+            .await
+            .map_err(|e| self.explain(e))
+    }
+
+    /// Store the phase 3 options.
+    ///
+    /// Validation lives in `settings::TwitchConfig::apply_requests`, which is pure and tested: a
+    /// misspelt role that reached the file would read back as `None`, and the session resolves that
+    /// to `Everyone` — so a channel that asked for subscribers would quietly open its queue.
+    ///
+    /// Changing the reward restarts the socket. An EventSub subscription's condition cannot be
+    /// modified after it is created, so the only way to stop listening for one reward and start
+    /// listening for another is to replace the subscription — and the subscription is bound to the
+    /// session, so the session is rebuilt. Same path `set_channel` takes, for the same reason.
+    pub async fn set_requests(
+        self: &Arc<Self>,
+        patch: settings::RequestSettings,
+    ) -> Result<(), String> {
+        let reward_changed = {
+            let mut inner = self.inner.lock().await;
+            let before = inner.config.reward_id.clone();
+            inner.config.apply_requests(patch)?;
+            before != inner.config.reward_id
+        };
+
+        self.persist_config().await;
+        if reward_changed {
+            self.stop_events().await;
+            self.start_events_if_ready().await;
+        }
+        self.emit().await;
         Ok(())
     }
 

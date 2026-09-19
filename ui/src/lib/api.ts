@@ -788,6 +788,38 @@ export const onLtNotice = (cb: (msg: string) => void): Promise<UnlistenFn> =>
 	listen<string>('lt-notice', (e) => cb(e.payload));
 
 // --- Twitch (src-tauri/src/twitch/) ----------------------------------------------------------
+
+/** One of the channel's Channel Points rewards, as the picker shows it. */
+export interface TwitchReward {
+	id: string;
+	/** What the streamer recognises. A list of UUIDs is not a picker. */
+	title: string;
+	cost: number;
+	/** A paused reward can still be chosen and will simply never fire. */
+	enabled: boolean;
+}
+
+/**
+ * What the panel sends when the phase 3 options are saved.
+ *
+ * One call rather than eight. The panel has all of it on screen together, and saving a field at a
+ * time would let a half-applied state exist — a reward chosen while requests are still off, or a
+ * cooldown the user believes they changed.
+ *
+ * Validation is Rust's, not this file's: `apply_requests` is pure and tested, and it is the only
+ * place that can refuse a misspelt role before it reaches the settings file. What comes back is an
+ * error string meant to be shown as-is.
+ */
+export interface TwitchRequestSettings {
+	enabled: boolean;
+	prefix: string;
+	aliases: string[];
+	minRole: string;
+	userCooldownSecs: number;
+	globalCooldownSecs: number;
+	rewardId: string;
+	replyInChat: boolean;
+}
 // Phase 1 is the account session only: connect the streamer's own Twitch account, pick the
 // channel, and keep the token alive. Commands, rewards and Bits come later, and they arrive on the
 // same connection — nothing here has to change shape for them.
@@ -814,6 +846,27 @@ export interface TwitchConfig {
 	channelId: string | null;
 	/** Connect on launch when a stored token still validates. Off by default. */
 	autoConnect: boolean;
+
+	// --- Phase 3: answering the channel ------------------------------------------------------
+	// `false` until switched on, like `autoConnect`. An app that starts answering a chat it was
+	// only connected to would be a surprise, and a queue filled by strangers is worse than an
+	// empty one.
+	/** Whether chat commands are answered at all. */
+	requestsEnabled: boolean;
+	/** The character a command starts with. */
+	commandPrefix: string;
+	/** The command names that ask for a song, without the prefix. */
+	requestAliases: string[];
+	/** The lowest role that may request: everyone | subscriber | vip | moderator | broadcaster. */
+	minRole: string;
+	/** Seconds one viewer must wait between requests. Zero disables the window. */
+	userCooldownSecs: number;
+	/** Seconds between any two requests, whoever makes them. Zero disables the window. */
+	globalCooldownSecs: number;
+	/** The Channel Points reward whose redemptions are song requests. Empty answers none. */
+	rewardId: string;
+	/** Whether to say anything back in chat. Off means silent queueing. */
+	replyInChat: boolean;
 }
 
 /** The Device Code prompt: what to type, and where. Only present while `phase` is `connecting`. */
@@ -900,6 +953,13 @@ export const twCancel = () => invoke<void>('tw_cancel');
 /** Signs out and revokes the token server-side (best effort). */
 export const twDisconnect = () => invoke<void>('tw_disconnect');
 /** Chooses the channel; pass an empty string to clear it. */
+/** The channel's Channel Points rewards, for the picker. */
+export const twRewards = () => invoke<TwitchReward[]>('tw_rewards');
+
+/** Save the phase 3 options. Rust validates; an error is meant to be shown as-is. */
+export const twSetRequests = (settings: TwitchRequestSettings) =>
+	invoke<void>('tw_set_requests', { settings });
+
 export const twSetChannel = (login: string) => invoke<void>('tw_set_channel', { login });
 
 export const onTwState = (cb: (s: TwitchSnapshot) => void): Promise<UnlistenFn> =>

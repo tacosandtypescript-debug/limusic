@@ -57,6 +57,28 @@ pub async fn tw_disconnect(tw: Tw<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/// The channel's Channel Points rewards, for the picker.
+///
+/// Read-only and cheap, so the panel can call it whenever the reward section is opened. An error
+/// here is worth showing rather than swallowing: the usual one is "not an affiliate or partner",
+/// and a picker that silently lists nothing leaves the streamer hunting for a reward they cannot
+/// have.
+#[tauri::command]
+pub async fn tw_rewards(tw: Tw<'_>) -> Result<Vec<super::rewards::Reward>, String> {
+    tw.inner().clone().rewards().await
+}
+
+/// Store the phase 3 options — requests on or off, the command, who may use it, the cooldowns and
+/// which reward counts.
+///
+/// One command rather than eight. The panel has all of it on screen together, and saving a field at
+/// a time would allow a half-applied state to exist: a reward chosen while requests are still off,
+/// or a cooldown the user believes they changed.
+#[tauri::command]
+pub async fn tw_set_requests(tw: Tw<'_>, settings: super::RequestSettings) -> Result<(), String> {
+    tw.inner().clone().set_requests(settings).await
+}
+
 /// Choose the channel the bot listens to. Pass an empty string to clear it.
 ///
 /// Resolves the login to a numeric id, which is what every later EventSub condition needs, and

@@ -23,6 +23,7 @@
 	import { untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
+	import { Switch } from '$lib/components/ui/switch';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import * as api from '$lib/api';
 	import type { TwitchChatMessage } from '$lib/api';
@@ -36,6 +37,111 @@
 		'mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground';
 	const CARD = 'divide-y divide-border/60 overflow-hidden rounded-xl border bg-card';
 	const ROW = 'flex items-start justify-between gap-4 px-4 py-3';
+
+
+	// --- Phase 3: song requests ---------------------------------------------------------------
+	//
+	// Seeded once from the store, untracked, then owned here — the same rule the fields above
+	// follow, and for the same reason: a `tw-state` event lands on connect, on validate and on
+	// every save, and an effect that copied the store back into these would overwrite whatever the
+	// user was halfway through typing.
+	const ROLES = ['everyone', 'subscriber', 'vip', 'moderator', 'broadcaster'] as const;
+
+	/** The stored aliases as one editable string, which is how they are shown: `!sr !songrequest`. */
+	function aliasesToInput(prefix: string, aliases: string[]): string {
+		return aliases.map((a) => `${prefix}${a}`).join(' ');
+	}
+
+	let requestsEnabled = $state(untrack(() => twitch.config.requestsEnabled ?? false));
+	let commandInput = $state(
+		untrack(() =>
+			aliasesToInput(
+				twitch.config.commandPrefix ?? '!',
+				twitch.config.requestAliases ?? ['sr', 'songrequest']
+			)
+		)
+	);
+	let minRole = $state(untrack(() => twitch.config.minRole ?? 'everyone'));
+	let userCooldown = $state(untrack(() => twitch.config.userCooldownSecs ?? 30));
+	let globalCooldown = $state(untrack(() => twitch.config.globalCooldownSecs ?? 5));
+	let replyInChat = $state(untrack(() => twitch.config.replyInChat ?? true));
+	let rewardId = $state(untrack(() => twitch.config.rewardId ?? ''));
+
+	let rewards = $state<api.TwitchReward[]>([]);
+	let rewardsError = $state<string | null>(null);
+	let rewardBusy = $state(false);
+	let requestsError = $state<string | null>(null);
+
+	/**
+	 * Load the channel's rewards.
+	 *
+	 * The usual failure is a 403 for a channel that is not an affiliate or partner, which is not
+	 * retryable and is worth showing as-is: a picker that silently lists nothing leaves the
+	 * streamer hunting for a reward they cannot have.
+	 */
+	async function loadRewards() {
+		rewardBusy = true;
+		rewardsError = null;
+		try {
+			rewards = await api.twRewards();
+		} catch (e) {
+			rewards = [];
+			rewardsError = String(e);
+		} finally {
+			rewardBusy = false;
+		}
+	}
+
+	// Once, when there is a channel to ask about. Guarded on the array being empty so a save — which
+	// emits a new snapshot — does not refetch on every keystroke elsewhere.
+	$effect(() => {
+		if (connected && twitch.channel && rewards.length === 0 && !rewardBusy && !rewardsError) {
+			void loadRewards();
+		}
+	});
+
+	/**
+	 * Split the command box into a prefix and its names.
+	 *
+	 * The user types `!sr !songrequest`, which is what the panel advertises and what the config
+	 * cannot store — it keeps a prefix and a list of bare names. Splitting here rather than asking
+	 * for two fields keeps the common case (`!`) out of sight.
+	 */
+	function parseCommands(raw: string): { prefix: string; aliases: string[] } {
+		const parts = raw.trim().split(/\s+/).filter(Boolean);
+		if (parts.length === 0) return { prefix: '', aliases: [] };
+		// The prefix is whatever the first token starts with that is not a letter or a digit, or `!`.
+		const first = parts[0];
+		const match = /^[^\p{L}\p{N}]+/u.exec(first);
+		const prefix = match ? match[0] : '!';
+		const aliases = parts.map((p) => p.slice(prefix.length)).filter(Boolean);
+		return { prefix, aliases };
+	}
+
+	async function saveRequests() {
+		busy = true;
+		requestsError = null;
+		const { prefix, aliases } = parseCommands(commandInput);
+		try {
+			await api.twSetRequests({
+				enabled: requestsEnabled,
+				prefix,
+				aliases,
+				minRole,
+				userCooldownSecs: Number(userCooldown) || 0,
+				globalCooldownSecs: Number(globalCooldown) || 0,
+				rewardId,
+				replyInChat
+			});
+			toast.success(t('settings.twitch.requests_saved'));
+		} catch (e) {
+			// Shown in place rather than as a toast: the messages name the field that was wrong
+			// ("`moderater` is not a role"), and that is only useful next to the field.
+			requestsError = String(e);
+		} finally {
+			busy = false;
+		}
+	}
 
 	// --- derived state -----------------------------------------------------------------------
 
@@ -422,6 +528,120 @@
 					{t('settings.twitch.chat_waiting')}
 				</p>
 			{/if}
+		</div>
+	</section>
+{/if}
+
+
+{#if connected && twitch.channel}
+	<section class={GROUP}>
+		<h3 class={LABEL}>{t('settings.twitch.requests')}</h3>
+		<div class={CARD}>
+			<div class={ROW}>
+				<div class="min-w-0">
+					<p class="text-sm font-medium">{t('settings.twitch.requests_enabled')}</p>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_enabled_hint')}
+					</p>
+				</div>
+				<Switch bind:checked={requestsEnabled} />
+			</div>
+
+			<div class={ROW}>
+				<div class="min-w-0">
+					<p class="text-sm font-medium">{t('settings.twitch.requests_command')}</p>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_command_hint')}
+					</p>
+				</div>
+				<Input class="w-52" bind:value={commandInput} placeholder="!sr !songrequest" />
+			</div>
+
+			<div class={ROW}>
+				<div class="min-w-0">
+					<p class="text-sm font-medium">{t('settings.twitch.requests_role')}</p>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_role_hint')}
+					</p>
+				</div>
+				<select
+					class="h-9 rounded-md border bg-transparent px-3 text-sm"
+					bind:value={minRole}
+				>
+					{#each ROLES as role (role)}
+						<option value={role}>{t(`settings.twitch.role_${role}`)}</option>
+					{/each}
+				</select>
+			</div>
+
+			<div class={ROW}>
+				<div class="min-w-0">
+					<p class="text-sm font-medium">{t('settings.twitch.requests_cooldown')}</p>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_cooldown_hint')}
+					</p>
+				</div>
+				<div class="flex items-center gap-3">
+					<label class="flex items-center gap-2 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_cooldown_user')}
+						<Input class="w-20" type="number" min="0" max="3600" bind:value={userCooldown} />
+					</label>
+					<label class="flex items-center gap-2 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_cooldown_global')}
+						<Input class="w-20" type="number" min="0" max="3600" bind:value={globalCooldown} />
+					</label>
+				</div>
+			</div>
+
+			<div class={ROW}>
+				<div class="min-w-0">
+					<p class="text-sm font-medium">{t('settings.twitch.requests_reply')}</p>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_reply_hint')}
+					</p>
+				</div>
+				<Switch bind:checked={replyInChat} />
+			</div>
+
+			<div class={ROW}>
+				<div class="min-w-0">
+					<p class="text-sm font-medium">{t('settings.twitch.requests_reward')}</p>
+					<p class="mt-0.5 text-xs text-muted-foreground">
+						{t('settings.twitch.requests_reward_hint')}
+					</p>
+				</div>
+				<div class="flex items-center gap-2">
+					<select
+						class="h-9 max-w-56 rounded-md border bg-transparent px-3 text-sm"
+						bind:value={rewardId}
+						disabled={rewardBusy}
+					>
+						<option value="">{t('settings.twitch.requests_reward_none')}</option>
+						{#each rewards as reward (reward.id)}
+							<option value={reward.id}>
+								{reward.enabled ? reward.title : t('settings.twitch.requests_reward_paused', { title: reward.title })}
+							</option>
+						{/each}
+					</select>
+					<Button variant="outline" size="sm" disabled={rewardBusy} onclick={loadRewards}>
+						<HugeiconsIcon icon={RefreshIcon} size={14} />
+					</Button>
+				</div>
+			</div>
+
+			{#if rewardsError}
+				<p class="px-4 pb-3 text-xs text-destructive">{rewardsError}</p>
+			{/if}
+			{#if requestsError}
+				<p class="px-4 pb-3 text-xs text-destructive">{requestsError}</p>
+			{/if}
+
+			<div class={ROW}>
+				<p class="text-xs text-muted-foreground">{t('settings.twitch.requests_footer')}</p>
+				<Button size="sm" disabled={busy} onclick={saveRequests}>
+					{t('settings.twitch.requests_save')}
+				</Button>
+			</div>
 		</div>
 	</section>
 {/if}
