@@ -113,7 +113,7 @@ if (q.has("cardop") || (preset && "opacity" in preset)) {
 }
 
 const $ = (elId) => document.getElementById(elId);
-const el = { art: $("art"), cover: $("cover"), ring: $("ring"), title: $("title"),
+const el = { art: $("art"), cover: $("cover"), ring: $("ring"), meta: $("meta"), stack: $("stack"), title: $("title"),
              titleText: $("titleText"), artist: $("artist"), artistText: $("artistText"),
              album: $("album"), byline: $("byline"),
              fill: $("fill"), elapsed: $("elapsed"), remaining: $("remaining") };
@@ -149,8 +149,10 @@ const COVER_URL = BASE + "cover?";
 const T = (() => {
   const cs = getComputedStyle(body);
   const ms = (name, d) => { const v = parseFloat(cs.getPropertyValue(name)); return Number.isFinite(v) ? v : d; };
+  // No `enter`: the roll is one phase over the whole change, so nothing waits for an incoming half.
+  // The token still exists, and the artwork's own entrance still uses it in CSS.
   return { text: ms("--dur-text", 300), art: ms("--dur-art", 440),
-           exit: ms("--dur-exit", 218), enter: ms("--dur-enter", 462),
+           exit: ms("--dur-exit", 218),
            swap: ms("--dur-swap", 680), color: ms("--dur-color", 680) };
 })();
 const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -611,14 +613,36 @@ async function swapTo(track) {
   // and a cold one has already started by the time it is needed. If it fails, nothing here cares —
   // `setCover` still handles that, and still falls back to the music note.
   if (track.thumbnail) { const warm = new Image(); warm.src = coverSrc(track.thumbnail); }
+
+  // The outgoing content, cloned so it is really there while the incoming one arrives.
+  //
+  // This is what makes the roll a roll. The DOM holds one set of content, so a change that reuses it
+  // has to empty the card to write the new values in — which is the relay the roll is meant to stop
+  // being. A copy costs one `cloneNode` on six short elements, and it buys the thing that no amount
+  // of timing could: two sets of content on screen at the same time, which is what the roll is.
+  //
+  // Ids come off the copy. It is a duplicate of a subtree that has them, and two elements with the
+  // same id is the kind of thing that works until the day something asks for one of them.
+  const ghost = el.stack.cloneNode(true);
+  ghost.removeAttribute("id");
+  ghost.classList.add("ghost");
+  ghost.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+  el.meta.append(ghost);
+
+  paint(track);                             // the new values, in the block that is about to roll in
+  void body.offsetWidth;                    // a reflow, or the class change animates from nowhere
+  body.classList.add("roll");
+
+  // The artwork keeps its own two halves inside the same window; the roll itself is one phase.
   body.classList.add("swap-out");
   await wait(T.exit);
-  paint(track);
   body.classList.remove("swap-out");
-  void body.offsetWidth;                    // force a reflow so `swap-in` starts a fresh animation
+  void body.offsetWidth;
   body.classList.add("swap-in");
-  await wait(T.enter);
-  body.classList.remove("swap-in");
+
+  await wait(T.swap - T.exit);
+  body.classList.remove("roll", "swap-in");
+  ghost.remove();
   // The new cover is the one on screen now; the old one is only in the way of the next wipe.
   el.art.style.backgroundImage = "";
   swapping = false;

@@ -66,51 +66,56 @@
         <span class="ring" id="ring"></span>
       </div>
 
-      <div class="meta">
-        <p class="eyebrow">
-          <span>Ahora suena</span>
-          <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-          <!-- Who asked for this one, when somebody did. Hidden while empty — an empty span still
-               takes the flex gap, so the bars would sit further from the words on every song nobody
-               requested. The queue has carried the label since the Twitch work; nothing read it. -->
-          <span class="byline" id="byline" hidden></span>
-        </p>
-        <h1 class="title" id="title"><span id="titleText">—</span></h1>
-        <p class="artist" id="artist"><span id="artistText"></span></p>
-        <p class="album" id="album"></p>
+      <div class="meta" id="meta">
+        <!-- The contents roll as one block on a track change, so they live in a wrapper. A roll
+             moves them together by their own height, and six separate animations cannot know what
+             that height is in a design none of them has seen. -->
+        <div class="stack" id="stack">
+          <p class="eyebrow">
+            <span>Ahora suena</span>
+            <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <!-- Who asked for this one, when somebody did. Hidden while empty — an empty span still
+                 takes the flex gap, so the bars would sit further from the words on every song nobody
+                 requested. The queue has carried the label since the Twitch work; nothing read it. -->
+            <span class="byline" id="byline" hidden></span>
+          </p>
+          <h1 class="title" id="title"><span id="titleText">—</span></h1>
+          <p class="artist" id="artist"><span id="artistText"></span></p>
+          <p class="album" id="album"></p>
 
-        <div class="progress">
-          <div class="bar"><div class="fill" id="fill"></div></div>
-          <div class="times">
-            <span id="elapsed">0:00</span>
-            <span class="remaining" id="remaining">-0:00</span>
+          <div class="progress">
+            <div class="bar"><div class="fill" id="fill"></div></div>
+            <div class="times">
+              <span id="elapsed">0:00</span>
+              <span class="remaining" id="remaining">-0:00</span>
+            </div>
           </div>
-        </div>
 
-        <div class="controls" id="controls">
-          <button type="button" data-action="prev" aria-label="Canción anterior">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <!-- Bar then a triangle whose apex is on the LEFT: |◀ -->
-              <path d="M6 5h2v14H6zm3.5 7 9-7v14z"/>
-            </svg>
-          </button>
-          <button type="button" class="play" data-action="toggle" aria-label="Reproducir o pausar">
-            <svg class="glyph-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M7 4h3.5v16H7zm6.5 0H17v16h-3.5z"/>
-            </svg>
-            <svg class="glyph-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M7 4l13 8-13 8z"/>
-            </svg>
-          </button>
-          <button type="button" data-action="next" aria-label="Canción siguiente">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <!-- Apex on the RIGHT, then the bar: ▶| — the mirror of `prev`, not a rotation of it.
-                   This was `M5.5 12l9 7V5z`, which drew the apex on the *left*: both transport
-                   arrows pointed backwards, and the mistake is invisible in a diff because the
-                   path is different, valid, and still draws a triangle. -->
-              <path d="M16 5h2v14h-2zM5.5 5l9 7-9 7z"/>
-            </svg>
-          </button>
+          <div class="controls" id="controls">
+            <button type="button" data-action="prev" aria-label="Canción anterior">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <!-- Bar then a triangle whose apex is on the LEFT: |◀ -->
+                <path d="M6 5h2v14H6zm3.5 7 9-7v14z"/>
+              </svg>
+            </button>
+            <button type="button" class="play" data-action="toggle" aria-label="Reproducir o pausar">
+              <svg class="glyph-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M7 4h3.5v16H7zm6.5 0H17v16h-3.5z"/>
+              </svg>
+              <svg class="glyph-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M7 4l13 8-13 8z"/>
+              </svg>
+            </button>
+            <button type="button" data-action="next" aria-label="Canción siguiente">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <!-- Apex on the RIGHT, then the bar: ▶| — the mirror of `prev`, not a rotation of it.
+                     This was `M5.5 12l9 7V5z`, which drew the apex on the *left*: both transport
+                     arrows pointed backwards, and the mistake is invisible in a diff because the
+                     path is different, valid, and still draws a triangle. -->
+                <path d="M16 5h2v14h-2zM5.5 5l9 7-9 7z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
       <!-- A light that crosses the whole card. Empty, and inert until a design gives it a

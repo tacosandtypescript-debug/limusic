@@ -557,68 +557,51 @@ fn the_palette_blends_rather_than_jumping() {
 #[test]
 fn a_track_change_is_sequenced() {
     let src = code();
-    let out = src.find(r#"body.classList.add("swap-out")"#).expect("no outgoing half");
-    let paint = src.find("  paint(track);\n  body.classList.remove(\"swap-out\");")
-        .expect("the content must change while the old one is invisible");
-    let inn = src.find(r#"body.classList.add("swap-in")"#).expect("no incoming half");
-    assert!(out < paint && paint < inn, "the sequence is out of order");
-    // A reflow between the halves, or the incoming animation is dropped as a no-op.
-    assert!(src.contains("void body.offsetWidth;"));
-    // The stagger: the words must not all arrive on the same frame, and every delay is the
-    // artwork's lead plus a step — see `a_track_change_adds_up`.
-    assert!(src.contains("var(--art-lead)"), "the words must wait for the artwork's head start");
-    for frac in ["0.05", "0.10", "0.15", "0.20"] {
-        assert!(
-            src.contains(&format!("calc(var(--art-lead) + var(--dur-enter) * {frac})")),
-            "the text stagger is missing the {frac} step"
-        );
-    }
-    // And the exit staggers too, or the content switches off instead of being replaced.
+
+    // The promise: the outgoing content is still on screen while the incoming content is written.
     //
-    // The steps are read rather than pinned, and their *shape* is checked: five of them, in
-    // increasing order, evenly spaced, and the last one small enough that the exit animation still
-    // fits inside the half it belongs to. The exact fractions are a tuning decision and have already
-    // moved once, from 0.06..0.22 to 0.03..0.15, to stop the card emptying out before the swap —
-    // pinning them made that deliberate change look like a regression.
-    let mut steps: Vec<f64> = Vec::new();
-    for line in src.lines() {
-        let line = line.trim();
-        if !line.starts_with("body.swap-out") || !line.contains("text-out") {
-            continue;
-        }
-        if let Some((_, rest)) = line.split_once("--dur-exit) * ") {
-            if let Some((v, _)) = rest.split_once(')') {
-                if let Ok(d) = v.trim().parse::<f64>() {
-                    steps.push(d);
-                }
-            }
-        }
-    }
-    steps.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    steps.dedup();
+    // This test used to assert the opposite — that `paint` happened while the old content was
+    // invisible, between an outgoing half and an incoming one. That was the relay, and the relay is
+    // why every version of the change had a frame with nothing on it: one set of content cannot be
+    // both leaving and arriving. The roll clones it instead, and the order below is what makes the
+    // clone worth having.
+    let clone = src.find("el.stack.cloneNode(true)").expect("the outgoing content must be cloned");
+    let append = src.find("el.meta.append(ghost)").expect("the clone must be put on screen");
+    let paint = src.find("paint(track);                             // the new values")
+        .or_else(|| src.find("paint(track);"))
+        .expect("the content must change");
     assert!(
-        steps.len() >= 4,
-        "the exit stagger has {} distinct steps, which is not a stagger",
-        steps.len()
+        clone < append && append < paint,
+        "the clone has to be on screen before the content is overwritten, or it is a copy of the new one"
+    );
+
+    // Ids come off it: it duplicates a subtree that has them.
+    assert!(src.contains(r#"ghost.removeAttribute("id")"#), "the clone must lose its own id");
+    assert!(
+        src.contains(r#"ghost.querySelectorAll("[id]").forEach"#),
+        "and every id inside it, or the document has two of each"
+    );
+
+    // And it is thrown away, or the next change clones a clone and the card grows one copy per song.
+    let remove = src.find("ghost.remove();").expect("the clone must be removed");
+    assert!(remove > paint, "the clone is removed before it is used");
+
+    // One phase, not two: both halves of the roll run together over the same window.
+    assert!(
+        src.contains(r#"body.classList.add("roll")"#),
+        "the roll needs its own class, or it runs on the artwork's two halves and there is a join"
     );
     assert!(
-        steps.windows(2).all(|w| w[1] > w[0]),
-        "the exit steps are not in order: {steps:?}"
+        src.contains("await wait(T.swap - T.exit)"),
+        "the roll must last the whole change, not the incoming half of it"
     );
-    let gaps: Vec<f64> = steps.windows(2).map(|w| w[1] - w[0]).collect();
-    let even = gaps.iter().cloned().fold(f64::INFINITY, f64::min) > 0.0
-        && (gaps.iter().cloned().fold(0.0_f64, f64::max)
-            - gaps.iter().cloned().fold(f64::INFINITY, f64::min))
-            < 0.005;
-    assert!(even, "the exit steps are not evenly spaced: {steps:?}");
-    assert!(
-        *steps.last().unwrap() < 0.30,
-        "the last exit step starts at {:.2} of the half, leaving no room to animate",
-        steps.last().unwrap()
-    );
+    // The artwork still runs its two halves inside that window, which is what the reflow is for.
+    assert!(src.contains("void body.offsetWidth;"));
+    assert!(src.contains(r#"body.classList.remove("roll", "swap-in")"#), "both classes come off");
     // The entrance plays once, on the first paint, and never again.
     assert!(src.contains("if (!booted)"), "the entrance must be one-shot");
 }
+
 
 /// The two transport arrows have to point opposite ways.
 ///
@@ -689,32 +672,20 @@ fn a_track_change_adds_up() {
     // The shape of the thing, which is what makes the arithmetic below possible.
     assert!(src.contains("--dur-exit:  calc(var(--dur-swap) * var(--exit-share))"));
     assert!(src.contains("--dur-enter: calc(var(--dur-swap) * (1 - var(--exit-share)))"));
-    // Read out of the stylesheet rather than pinned as text. This test is named for the arithmetic
-    // and it was checking four literals, so when the exits were lengthened on purpose — to stop the
-    // card emptying out between the two halves — it failed on the change and not on the sum. The
-    // numbers below are the sums, and they are what the design actually promises.
-    let factor = |token: &str| -> f64 {
-        src.split_once(token)
-            .and_then(|(_, rest)| rest.split_once('*'))
-            .map(|(_, v)| v.trim())
-            .and_then(|v| v.split(')').next())
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(0.0)
-    };
-    let exit_art_share = factor("--dur-exit-art:");
-    let exit_text_share = factor("--dur-exit-text:");
-    assert!(
-        (0.5..=1.0).contains(&exit_art_share),
-        "the artwork leaves over {exit_art_share:.2} of the outgoing half"
-    );
-    assert!(
-        (0.5..=1.0).contains(&exit_text_share),
-        "the words leave over {exit_text_share:.2} of it"
-    );
     assert!(src.contains("--dur-art:   min(440ms, calc(var(--dur-enter) * 0.95))"));
-    assert!(src.contains("--dur-text:  min(320ms, calc(var(--dur-enter) * 0.66))"));
     assert!(src.contains("--art-lead:  calc(var(--dur-enter) * 0.12)"));
-    assert!(src.contains("await wait(T.exit);") && src.contains("await wait(T.enter);"));
+    // The two waits must add up to the whole change. They used to be the outgoing half and the
+    // incoming half, and are now the artwork's exit and whatever is left of `--dur-swap` — a roll
+    // that stopped at the old `T.enter` would be cut off a fifth of the way through.
+    assert!(src.contains("await wait(T.exit);"), "the artwork's exit drives the first wait");
+    assert!(
+        src.contains("await wait(T.swap - T.exit)"),
+        "the second wait must be the remainder of the change, not a half of it"
+    );
+    assert!(
+        !src.contains("await wait(T.enter)"),
+        "T.enter is gone: a roll has no incoming half to wait for"
+    );
     assert!(!src.contains("SWAP_OUT"), "the timing table is back — it is the thing that drifted");
     // `body`, not `:root`: a custom property substitutes where it is declared, so a share overridden
     // on the body would never reach a `--dur-exit` declared on the root.
@@ -746,70 +717,34 @@ fn a_track_change_adds_up() {
         );
     }
 
+    // The roll is one animation covering the whole change, and the artwork's two halves have to fit
+    // inside it — the artwork is the only thing still running a relay, and its exit and its entrance
+    // both have to land before the roll does, or it is still moving when the next one starts.
+    let roll = src
+        .split_once("animation: roll-in  var(--dur-swap)")
+        .or_else(|| src.split_once("animation: roll-in var(--dur-swap)"))
+        .map(|_| swap)
+        .unwrap_or(0.0);
+    assert!(roll > 0.0, "the roll must be driven by --dur-swap");
+
     for (family, share) in &shares {
         let exit = swap * share;
         let enter = swap * (1.0 - share);
-        // Outgoing. The point of the outgoing half is that nothing has finished leaving when the
-        // content changes: whatever is still moving when the swap happens is what keeps the card
-        // from reading as blank in the middle of a change. That is the assertion, and it is the one
-        // the old numbers failed — the artwork went at 0.85 and the words tailed out at 0.90, so the
-        // card was empty for the whole join. It looked like a coarse transition because it was one.
-        let exit_art = exit * exit_art_share;
         assert!(
-            exit_art <= exit,
-            "{family}: the artwork's exit ({exit_art:.0}ms) overruns --dur-exit"
-        );
-        assert!(
-            exit - exit_art < 0.06 * exit,
-            "{family}: the artwork has finished leaving {:.0}ms before the content changes — the card \
-             empties out on the way in",
-            exit - exit_art
-        );
-
-        // The stagger, read from the stylesheet: the first delay and the last, and the animation
-        // they share. The last word must still be leaving at the moment of the swap.
-        let mut delays: Vec<f64> = Vec::new();
-        for line in src.lines() {
-            let line = line.trim();
-            if !line.starts_with("body.swap-out") || !line.contains("text-out") {
-                continue;
-            }
-            if let Some((_, rest)) = line.split_once("--dur-exit) * ") {
-                if let Some((v, _)) = rest.split_once(')') {
-                    if let Ok(d) = v.trim().parse::<f64>() {
-                        delays.push(d);
-                    }
-                }
-            }
-        }
-        assert!(delays.len() >= 4, "{family}: the exit stagger has {} steps", delays.len());
-        let first = delays.iter().cloned().fold(f64::INFINITY, f64::min);
-        let last = delays.iter().cloned().fold(0.0_f64, f64::max);
-        assert!(
-            first < last,
-            "{family}: the exit stagger ({first:.2}..{last:.2}) has no order to it"
-        );
-        let tail = exit * last + exit * exit_text_share;
-        assert!(tail <= exit + 0.5, "{family}: the exit tail ({tail:.0}ms) overruns --dur-exit");
-        assert!(
-            exit - tail < 0.06 * exit,
-            "{family}: the words finish leaving {:.0}ms before the content changes",
-            exit - tail
+            exit + enter <= roll + 0.5,
+            "{family}: the artwork's halves ({:.0}ms) outlast the roll ({roll:.0}ms)",
+            exit + enter
         );
 
         // Incoming: the artwork leads, every word is delayed by the lead plus its own step.
         let art = 440.0_f64.min(enter * 0.95);
-        let text = 320.0_f64.min(enter * 0.66);
-        let tail = enter * 0.12 + enter * 0.20 + text;
         assert!(art <= enter, "{family}: the artwork ({art:.0}ms) does not fit in --dur-enter ({enter:.0}ms)");
-        assert!(tail <= enter, "{family}: the text tail ({tail:.0}ms) overruns --dur-enter ({enter:.0}ms)");
         assert!(
             enter * 0.12 > 0.0 && enter * 0.12 < art,
             "{family}: the artwork must still be arriving when the first word starts"
         );
         // And the derived durations stay inside the bands the brief set.
         assert!((350.0..=500.0).contains(&art), "{family}: artwork {art:.0}ms outside 350-500");
-        assert!((250.0..=350.0).contains(&text), "{family}: text {text:.0}ms outside 250-350");
     }
 
     // No exit animation may run longer than the half it has to fit in.
@@ -821,6 +756,7 @@ fn a_track_change_adds_up() {
         }
     }
 }
+
 
 /// The rAF loops run for the whole stream, so they must not write to the DOM when nothing changed.
 ///

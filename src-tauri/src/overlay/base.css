@@ -327,7 +327,42 @@ body.paused .art img { filter: saturate(0.4) brightness(0.84); }
 .meta {
   min-width: 0; max-width: 100%;
   flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center;
+  /* ── The frame the content rolls inside ───────────────────────────────────────────────────────
+     A track change was a relay: everything left, the content was swapped while the card was empty,
+     and everything came back. Every version of that had a frame with nothing on it, because a relay
+     between one set of content and the same set cannot avoid one — the best it can do is make the
+     hole short, which is what several rounds of tuning were doing.
+
+     It rolls now. The outgoing content is still on screen while the incoming one arrives, one leaving
+     by the top as the other follows it up from below, and neither fades: the clip does the work. Two
+     things present at once is the whole idea, and it is why the card cannot be blank at any point in
+     the change — not because the timing was tuned well, but because there is no moment when there is
+     only one thing to show. */
+  position: relative;
+  overflow: hidden;
 }
+
+/* The content as one block that can be moved. A wrapper rather than the six elements because a roll
+   moves them together, and `translateY(-100%)` is the height of the block whatever a design makes it
+   — a number six separate animations could not know. */
+.stack {
+  min-width: 0; flex: 0 0 auto;
+  display: flex; flex-direction: column; justify-content: center;
+}
+
+/* The outgoing copy, laid exactly over the real one: absolutely positioned inside the padding box, so
+   it lands where the content is, and out of the flow so it does not push it. */
+.meta > .ghost { position: absolute; inset: 0; pointer-events: none; }
+
+/* One direction, both halves, no fade.
+ *
+ * The outgoing copy is clipped away at the top as it goes and the incoming one follows from below.
+ * A fade would be a second way of saying the same thing, and it is what made the old transition read
+ * as a swap rather than a roll — the content dimmed and brightened instead of moving. */
+@keyframes roll-out { to   { transform: translateY(-100%); } }
+@keyframes roll-in  { from { transform: translateY(100%); } }
+body.roll .stack:not(.ghost)     { animation: roll-in  var(--dur-swap) var(--ease-arrive) both; }
+body.roll .meta > .ghost         { animation: roll-out var(--dur-swap) var(--ease-arrive) both; }
 
 .eyebrow {
   display: flex; align-items: center; gap: 8px;
@@ -518,29 +553,12 @@ body:not(.paused) .controls .glyph-pause { opacity: 1; scale: 1; }
 @keyframes text-out { to { opacity: 0; transform: translateY(-6px); } }
 @keyframes text-in  { from { opacity: 0; transform: translateY(9px); } }
 
-/* The words leave in a short stagger, the top line first, so the eye follows the content out rather
-   than watching it switch off. The delays are fractions of the outgoing half, like the incoming ones,
-   so the two halves can change size without anything being cut.
-   
-   The stagger was 0.06 to 0.22 over a 0.68 animation, which put the last word out at 0.90 of the half
-   and the first at 0.74 — both of them a tenth of the change before the content actually swapped, so
-   the card was empty for the whole join. The steps are tighter and the animation longer now: the last
-   lands exactly on 1.00, so nothing has finished leaving when the track changes. */
-body.swap-out .eyebrow  { animation: text-out var(--dur-exit-text) var(--ease-soft) calc(var(--dur-exit) * 0.03) both; }
-body.swap-out .title    { animation: text-out var(--dur-exit-text) var(--ease-soft) calc(var(--dur-exit) * 0.06) both; }
-body.swap-out .artist   { animation: text-out var(--dur-exit-text) var(--ease-soft) calc(var(--dur-exit) * 0.09) both; }
-body.swap-out .album    { animation: text-out var(--dur-exit-text) var(--ease-soft) calc(var(--dur-exit) * 0.12) both; }
-body.swap-out .progress,
-body.swap-out .controls { animation: text-out var(--dur-exit-text) var(--ease-soft) calc(var(--dur-exit) * 0.15) both; }
-/* Every word waits for the artwork's head start, then takes its own step. The last one begins at
-   0.12 + 0.20 = 0.32 of the half and runs 0.66, landing at 0.98 — inside it, with a little room. */
-body.swap-in .eyebrow  { animation: text-in var(--dur-text) var(--ease-arrive) var(--art-lead) both; }
-body.swap-in .title    { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.05) both; }
-body.swap-in .artist   { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.10) both; }
-body.swap-in .album    { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.15) both; }
-body.swap-in .progress,
-body.swap-in .controls { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.20) both; }
-
+/* The words no longer have exits and entrances of their own.
+ *
+ * They had a stagger each way, a fade, and a small drift, all tuned over several rounds to close the
+ * gap in the middle of the change — and the gap was never going to close, because the structure
+ * guaranteed one. The whole block rolls now, as one thing, in one direction. The stagger went with
+ * it: a stagger is a way of drawing out a departure, and nothing departs any more. */
 /* A swap in progress suspends the marquee: two animations on nested elements both moving is fine,
    but a title scrolling while its container is also sliding reads as a glitch. */
 body.swap-in .marquee > span, body.swap-out .marquee > span { animation: none; }
