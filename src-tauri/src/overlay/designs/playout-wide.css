@@ -102,6 +102,25 @@ body[data-design="playout-wide"] .art {
 body[data-design="playout-wide"] .art img,
 body[data-design="playout-wide"] .art .fallback { border-radius: 0; }
 
+/* ── The tally ────────────────────────────────────────────────────────────────────────────────
+   A hard accent line where the cover band meets the plate. Every lower-third has one: it is the
+   mark that says the signal is live, and here it is also the only thing on the plate that is not
+   text or a rule.
+
+   It needs no animation of its own, and that is the reason it lives on `.art` rather than on the
+   plate. The band already wipes with `clip-path` on every track change, and this sits inside that
+   clip — so the line is taken away by the outgoing wipe and laid back down by the incoming one, in
+   step with the artwork it belongs to. A separate keyframe would have been a second animation doing
+   the same job a frame out of phase with the first. */
+body[data-design="playout-wide"] .art::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; right: 0;
+  width: 3px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
 body[data-design="playout-wide"] .meta {
   flex: 1 1 auto;
   padding: 14px var(--pad) 18px;
@@ -158,13 +177,42 @@ body[data-design="playout-wide"] .bar {
   position: static;
   height: 3px;
   border-radius: 0;
-  background: oklch(1 0 0 / 12%);
+  /* 12% was too little for something called a ticker. On a translucent plate over a bright frame it
+     disappeared entirely, which turns the progress into a floating fill with no rail under it. At 20%
+     the rail reads as a rail and the fill still leads it by a clear margin. */
+  background: oklch(1 0 0 / 20%);
 }
 
 body[data-design="playout-wide"] .fill { border-radius: 0; }
 
-/* A hard rule needs no scrubber dot; the ticker's own leading edge is the marker. */
-body[data-design="playout-wide"] .fill::after { display: none; }
+/* ── The colour of the small print ─────────────────────────────────────────────────────────────
+   The album line ships at `--ink-3`, which is right on a card that is mostly its own dark surface
+   and too little on a plate that is translucent over whatever the cover happens to be. Measured
+   against the darkest and the lightest frame the demo library has, 0.68 of lightness disappears on
+   the bright ones. `--ink-2` is one step up and still below the artist, so the order of the three
+   lines is unchanged. */
+body[data-design="playout-wide"] .album { color: var(--ink-2); }
+
+/* A hard rule needs no scrubber dot; the ticker's own leading edge is the marker — for most of a
+   song. In the last stretch the edge thickens into a head, so the end of a track is visible from the
+   corner of an eye without reading the clock, which is the one thing a streamer cannot spare the
+   attention for. It is not a dot: it is square, the same three pixels as the rail, and it is only
+   there for the last 8% — for the other 92 the ticker is exactly as clean as it was. */
+body[data-design="playout-wide"] .fill::after {
+  display: block;
+  right: -1px;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  translate: none;
+  border-radius: 0;
+  background: var(--accent);
+  box-shadow: 0 0 calc(10px * var(--glow)) var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur-btn) var(--ease-out);
+}
+
+body[data-design="playout-wide"].ending .fill::after { opacity: 1; }
 
 body[data-design="playout-wide"] .fill::before { background-image: none; }
 

@@ -567,6 +567,10 @@ function tick(now) {
       // The position dot needs a fill to sit on. Below this it hangs off the pill's rounded end.
       const dot = pct > 1.2;
       if (dot !== lastDot) { body.classList.toggle("no-dot", !dot); lastDot = dot; }
+      // The last stretch of a track, as a class rather than a second width write — only one design
+      // uses it today, and the tick is the only place that knows the position.
+      const ending = p > 0.92;
+      if (ending !== lastEnding) { body.classList.toggle("ending", ending); lastEnding = ending; }
     }
     // The ring's stop is a custom property inside a conic gradient, which CSS cannot interpolate —
     // so the target is approached here instead, and a seek glides the ring exactly as it glides the
@@ -585,7 +589,7 @@ function tick(now) {
   }
   requestAnimationFrame(tick);
 }
-let lastLive = 0, lastPct = -1, lastRing = -1, lastSec = -1, lastPaused = null, lastDot = null;
+let lastLive = 0, lastPct = -1, lastRing = -1, lastSec = -1, lastPaused = null, lastDot = null, lastEnding = null;
 let justPainted = false;   // the track changed on this frame: the bar's jump is not a seek
 let ringShown = 0;         // the ring's eased position; it cannot be CSS-transitioned
 let lastFrame = 0;
