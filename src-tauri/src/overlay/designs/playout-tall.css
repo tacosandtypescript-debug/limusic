@@ -18,20 +18,14 @@
 
    The title's *size* is deliberately not here — 28px against 26px — because the two compositions
    are different sizes and a heading has to answer to the box it sits in. */
-body[data-design^="playout"] #now { font-family: Bahnschrift, "DIN Alternate", "Segoe UI Variable Display", "Segoe UI", sans-serif; }
-
-body[data-design^="playout"] .eyebrow {
+body[data-design^="playout"] #now { font-family: Bahnschrift, "DIN Alternate", "Segoe UI Variable Display", "Segoe UI", sans-serif; }body[data-design^="playout"] .eyebrow {
   color: var(--ink-3);
   letter-spacing: 0.2em;
-}
-
-body[data-design^="playout"] .title {
+}body[data-design^="playout"] .title {
   font-weight: 600;
   letter-spacing: 0.01em;
   text-transform: uppercase;
-}
-
-body[data-design^="playout"] .times, body[data-design^="playout"] .controls {
+}body[data-design^="playout"] .times, body[data-design^="playout"] .controls {
   font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
   letter-spacing: 0.06em;
 }
@@ -43,26 +37,19 @@ body[data-design^="playout"] .times, body[data-design^="playout"] .controls {
 
    Opacity stays at 1 throughout on purpose. A wipe that also fades is two effects doing one job, and
    the moment it fades it stops reading as a mixer and starts reading as a dissolve. */
+
 @keyframes playout-art-out {
   0%   { clip-path: inset(0 0 0 0); transform: scale(1); }
   100% { clip-path: inset(0 100% 0 0); transform: scale(1.03); }
-}
-
-@keyframes playout-art-in {
+}@keyframes playout-art-in {
   0%   { clip-path: inset(0 0 0 100%); transform: scale(1.03); }
   100% { clip-path: inset(0 0 0 0); transform: scale(1); }
-}
-
-@keyframes wipe {
+}@keyframes wipe {
   0%   { opacity: 0.5; transform: translateX(-100%); }
   100% { opacity: 0;   transform: translateX(100%); }
-}
-
-body[data-design^="playout"].swap-out .art { animation: playout-art-out var(--dur-exit-art) var(--ease-soft) both; }
-
-body[data-design^="playout"].swap-in .art { animation: playout-art-in var(--dur-art) var(--ease-out) both; }/* `.art` has no filter of its own, so animating one here promotes it for the duration only. */ body[data-design="playout-tall"] .art { will-change: auto; }
-
-body[data-design^="playout"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }/* ═══════════════════════════════════════════════════════════════════════════════════════════════ OVERLAY 4 · PLAYOUT-TALL — 380 × 430 The station ident, stacked: cover as a band across the top, plate below. ═══════════════════════════════════════════════════════════════════════════════════════════════ */ body[data-design="playout-tall"] #now {
+}body[data-design^="playout"].swap-out .art { animation: playout-art-out var(--dur-exit-art) var(--ease-soft) both; }body[data-design^="playout"].swap-in .art { animation: playout-art-in var(--dur-art) var(--ease-out) both; }/* `.art` has no filter of its own, so animating one here promotes it for the duration only. */
+body[data-design="playout-tall"] .art { will-change: auto; }body[data-design^="playout"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }/* ═══════════════════════════════════════════════════════════════════════════════════════════════ OVERLAY 4 · PLAYOUT-TALL — 380 × 430 The station ident, stacked: cover as a band across the top, plate below. ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="playout-tall"] #now {
   --card-radius: 0px;
   padding: 0;
   gap: 0;
@@ -71,7 +58,8 @@ body[data-design^="playout"] .art img { animation: breathe var(--cycle-breathe) 
   box-shadow: var(--card-shadow);
   flex-direction: column;
   align-items: stretch;
-}/* `.art` has no filter of its own, so animating one here promotes it for the duration only. */ body[data-design="playout-tall"] .art {
+}/* `.art` has no filter of its own, so animating one here promotes it for the duration only. */
+body[data-design="playout-tall"] .art {
   width: 380px;
   height: 200px;
   border-radius: 0;
@@ -103,10 +91,10 @@ body[data-design^="playout"] .art img { animation: breathe var(--cycle-breathe) 
 }body[data-design="playout-tall"].paused .eyebrow::before {
   background: var(--ink-3);
   box-shadow: none;
-}body[data-design="playout-tall"] .eq i { background: var(--ink-3); }body[data-design="playout-tall"] .title { font-size: 26px; }/* Same correction as the horizontal one: the ticker is in the flow. */ body[data-design="playout-tall"] .bar {
+}body[data-design="playout-tall"] .eq i { background: var(--ink-3); }body[data-design="playout-tall"] .title { font-size: 26px; }/* Same correction as the horizontal one: the ticker is in the flow. */
+body[data-design="playout-tall"] .bar {
   position: static;
   height: 3px;
   border-radius: 0;
   background: oklch(1 0 0 / 12%);
 }body[data-design="playout-tall"] .fill { border-radius: 0; }body[data-design="playout-tall"] .fill::after { display: none; }body[data-design="playout-tall"] .fill::before { background-image: none; }body[data-design="playout-tall"] .times { margin-top: 12px; }
-

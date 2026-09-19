@@ -442,7 +442,11 @@ mod tests {
             match c {
                 '{' => {
                     if depth == 0 {
-                        let sel = buf.trim().to_string();
+                        // Whitespace inside the selector is collapsed, not just trimmed. Two rules
+                        // saying the same thing with a line break in different places are the same
+                        // rule, and a comparison that thinks otherwise fails on reformatting — which
+                        // is exactly what happened when one of a pair was reflowed for readability.
+                        let sel = buf.split_whitespace().collect::<Vec<_>>().join(" ");
                         // An at-rule is not a selector, and nothing inside one sits at depth zero.
                         if !sel.is_empty() && !sel.starts_with('@') {
                             start = at;
@@ -546,7 +550,8 @@ mod tests {
                     panic!("{family}: `{sel}` is shared but missing from {tall}")
                 });
                 assert_eq!(
-                    body, other.1,
+                    normalize(&body),
+                    normalize(&other.1),
                     "{family}: `{sel}` has drifted — {wide} and {tall} no longer say the same thing"
                 );
             }
@@ -561,6 +566,30 @@ mod tests {
                 let _ = own;
             }
         }
+    }
+
+    /// A rule body reduced to what it *says*, so reformatting is not mistaken for drift.
+    ///
+    /// The first version of this compared the raw text of the body, and the moment one of a pair was
+    /// reflowed for readability the guard failed — on a difference of line breaks, in a rule whose
+    /// declarations were identical. A check that cries wolf about whitespace is a check somebody
+    /// eventually silences, and then it is not checking anything.
+    ///
+    /// Declarations are compared as a multiset, because the cascade does not care about their order
+    /// either — two rules with the same declarations in a different order say the same thing.
+    fn normalize(body: &str) -> Vec<String> {
+        let inner = body
+            .trim()
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .to_string();
+        let mut out: Vec<String> = inner
+            .split(';')
+            .map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|d| !d.is_empty())
+            .collect();
+        out.sort();
+        out
     }
 
     /// The typography declarations of a rule body.
