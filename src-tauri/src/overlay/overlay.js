@@ -639,7 +639,13 @@ function tick(now) {
     const dur = seconds(state && state.duration) || seconds(track.duration);
     // Interpolate locally: Rust pushes a position about four times a second, and a bar that only
     // moves on the poll looks like it is stuttering.
-    const live = paused ? anchor.pos : anchor.pos + (performance.now() - anchor.at) / 1000;
+    // Clamped at the end in demo mode, and here rather than at the bar because the timestamps read
+    // from the same number: `live` counts up from the track's position for as long as a preview page
+    // is open, so four minutes into a 4:05 track the bar pinned itself at 100% and the remainder
+    // read `-0:00`. On stream the position comes from the server and never passes the end; in a
+    // preview it does, and it reads as a bug — which is how it was reported.
+    const raw = paused ? anchor.pos : anchor.pos + (performance.now() - anchor.at) / 1000;
+    const live = q.get("demo") === "1" && dur > 0 ? Math.min(raw, dur) : raw;
     const p = dur > 0 ? Math.min(1, live / dur) : 0;
     // A seek is the one time the width jumps, and animating that single jump is what keeps the bar
     // from teleporting. A track change jumps too, but it must not be animated — see `justPainted`.

@@ -140,11 +140,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, fh.read())
 
             elif route == "/version":
-                try:
-                    stamp = f"{os.path.getmtime(PAGE):.3f}"
-                except OSError:
-                    stamp = "missing"
-                self._send(200, stamp, "text/plain; charset=utf-8")
+                # Every file the page is built from, not just the shell.
+                #
+                # It watched `page.html` alone, which was the entire page when this was written and
+                # is now a hundred lines of markup. So editing a stylesheet — which is what almost
+                # all overlay work is — changed nothing the poll could see, and an open overlay went
+                # on rendering the previous version while looking perfectly alive. That is the worst
+                # kind of stale, because the obvious response is to change the CSS harder.
+                stamp = []
+                for name in ["page.html"] + list(ASSETS):
+                    try:
+                        stamp.append(f"{name}:{os.path.getmtime(os.path.join(OVERLAY_DIR, name)):.3f}")
+                    except OSError:
+                        stamp.append(f"{name}:missing")
+                self._send(200, "|".join(stamp), "text/plain; charset=utf-8")
 
             elif route == "/cover":
                 # The whole query *is* the URL — no parameter name — because that is what the page
