@@ -463,6 +463,19 @@ function paint(track) {
   // The next tick writes the new track's values regardless of what the old ones were: without this
   // a song that starts at 0:00 after one that ended near 0:00 would keep the previous timestamps.
   lastSec = -1; lastPct = -1; lastRing = -1;
+  // And the clock has to be re-anchored, or the bar describes the age of the tab.
+  //
+  // `poll` returns before the server path that anchors it when `demo=1`, so in the preview nothing
+  // ever did: the position ran from the moment the page loaded rather than from the song's own
+  // position. Eight seconds in it read 0:08 and looked plausible; six minutes in it read 6:43 against
+  // a 4:05 track and sat pinned at 100%. Every look at the bar in the preview so far has been a look
+  // at the wrong number.
+  //
+  // Demo only. A real overlay takes its position from the server, and a track's own `position` is a
+  // snapshot from when the queue entry was built, not where playback is now.
+  if (q.get("demo") === "1") {
+    anchor = { pos: Number(track.position) || 0, at: performance.now() };
+  }
   // And the bar must not *slide* to the new position. A track change jumps, the same as a seek
   // does, so without this the seek transition fires and the new song's bar animates up from the
   // previous song's position — which reads as the old track still finishing.
@@ -621,13 +634,54 @@ async function poll() {
 }
 
 /* Real controls, not decoration. They work from OBS's "Interact" window; on stream nobody can
-   click them, which is exactly why they must not pretend. */
+   click them, which is exactly why they must not pretend.
+
+   In `demo` mode there is no LiMusic to post to, so the transport acts on the short list below
+   instead. Without that the prev and next buttons did nothing at all in the preview — which meant
+   the one animation this whole file is built around, the track change, could only be triggered from
+   the switcher page and never from the thing being reviewed. Reviewing motion by reloading a page is
+   reviewing the *entrance*, which is a different animation. */
+const DEMO_SET = [
+  { videoId: "demo-1", title: "Eye Of The Tiger", artists: "Survivor", album: "Eye Of The Tiger",
+    duration: 245, position: 38, thumbnail: "https://i.ytimg.com/vi/btPJPFnesV4/maxresdefault.jpg" },
+  { videoId: "demo-2", title: "Girls Just Want To Have Fun", artists: "Cyndi Lauper", album: "She's So Unusual",
+    duration: 238, position: 96, thumbnail: "https://i.ytimg.com/vi/PIb6AZdTr-A/maxresdefault.jpg" },
+  { videoId: "demo-3", title: "Jump", artists: "Van Halen", album: "1984",
+    duration: 242, position: 12, thumbnail: "https://i.ytimg.com/vi/SwYN7mTi6HM/maxresdefault.jpg" },
+  { videoId: "demo-4", title: "Take On Me", artists: "a-ha", album: "Hunting High and Low",
+    duration: 225, position: 150, thumbnail: "https://i.ytimg.com/vi/djV11Xbc914/maxresdefault.jpg" },
+  // A deliberately long one, because the marquee, the ellipsis and the title's fit only ever show
+  // themselves on a title that does not fit. Every demo song being short is how those bugs survive.
+  { videoId: "demo-5", title: "Everybody Wants To Rule The World", artists: "Tears for Fears",
+    album: "Songs from the Big Chair", duration: 251, position: 200,
+    thumbnail: "https://i.ytimg.com/vi/aGCdLKXNF3w/maxresdefault.jpg" }
+];
+
+/** Which of the demo tracks is showing, by index.
+ *
+ * Starts at 0 rather than -1, because the first entry is the track the URL describes. Beginning at
+ * -1 made the first press of "next" move to index 0 — the same song — so the button looked broken
+ * on the very first click, which is the click that decides whether someone trusts it.
+ */
+let demoAt = 0;
+
 $("controls").addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-action]");
   if (!btn) return;
   const action = btn.dataset.action;
   if (q.get("demo") === "1") {
-    if (action === "toggle") body.classList.toggle("paused");
+    if (action === "toggle") { body.classList.toggle("paused"); return; }
+    // Wrapping, so prev from the first lands on the last rather than doing nothing — a button that
+    // silently stops at the end of a list reads as broken.
+    const step = action === "next" ? 1 : -1;
+    demoAt = ((demoAt < 0 ? 0 : demoAt) + step + DEMO_SET.length) % DEMO_SET.length;
+    const next = DEMO_SET[demoAt];
+    const first = shownId === null;
+    previewTrack = next;
+    shownId = next.videoId;
+    // The same two calls the preview channel makes, so the demo runs the real sequence rather than
+    // a simplified one that could hide what is being reviewed.
+    if (first) paint(next); else swapTo(next);
     return;
   }
   try {
