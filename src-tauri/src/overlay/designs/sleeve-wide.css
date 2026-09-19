@@ -122,10 +122,14 @@ body[data-design="sleeve-wide"] .art::after {
   content: "";
   position: absolute; inset: 0; border-radius: 6px;
   pointer-events: none;
+  /* Wide and faint on purpose. The first version was a 32% band at 34% white, which read as
+     a sparkle travelling across the cover — the gesture is a light *passing*, not a highlight
+     arriving, and a narrow bright stripe is the difference between the two. This one is
+     54% wide at 15% peak: the same travel with nothing to catch the eye. */
   background: linear-gradient(105deg,
-    transparent 34%,
-    oklch(1 0 0 / 34%) 50%,
-    transparent 66%);
+    transparent 23%,
+    oklch(1 0 0 / 15%) 50%,
+    transparent 77%);
   opacity: 0;
 }
 /* Both figures are tokens, and not only because `motion_is_defined_once_in_tokens` says so: they are

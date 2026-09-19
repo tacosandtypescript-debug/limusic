@@ -133,10 +133,14 @@ body[data-design="sleeve-tall"] .art::after {
   content: "";
   position: absolute; inset: 0; border-radius: 8px;
   pointer-events: none;
+  /* Wide and faint on purpose. The first version was a 32% band at 34% white, which read as
+     a sparkle travelling across the cover — the gesture is a light *passing*, not a highlight
+     arriving, and a narrow bright stripe is the difference between the two. This one is
+     58% wide at 13% peak: the same travel with nothing to catch the eye. */
   background: linear-gradient(125deg,
-    transparent 32%,
-    oklch(1 0 0 / 30%) 50%,
-    transparent 68%);
+    transparent 21%,
+    oklch(1 0 0 / 13%) 50%,
+    transparent 79%);
   opacity: 0;
 }
 body[data-design="sleeve-tall"].swap-in .art::after {
