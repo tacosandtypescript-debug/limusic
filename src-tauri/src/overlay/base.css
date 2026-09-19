@@ -40,6 +40,18 @@
   --dur-color:  680ms;
   --ease-out:   cubic-bezier(0.16, 1, 0.3, 1);   /* the house easing: fast in, long settle */
   --ease-soft:  cubic-bezier(0.33, 0, 0.15, 1);  /* for things that leave */
+  /* And one for things that arrive during a track change.
+   *
+   * The house easing is `cubic-bezier(0.16, 1, 0.3, 1)`, which is an expo-out: it covers about 90%
+   * of the distance in the first third of its time and then spends the rest settling. That is a
+   * deliberate, dramatic curve and it is right for a card arriving once at boot. Across a track
+   * change it is the snap — the content plants itself and then creeps, and the change reads as
+   * abrupt even though it has 700ms to spend.
+   *
+   * This one is a quad-out. It decelerates from the first frame instead of from the second third, so
+   * the same distance over the same time lands as a drift. Nothing else uses it: boot, the sheen, the
+   * equaliser and every loop keep the house curve, because they are not arriving from anywhere. */
+  --ease-arrive: cubic-bezier(0.22, 0.61, 0.36, 1);
   /* Ambient loops. Deliberately outside the bands above: these are not interactions and nothing
      waits on them. Named tokens all the same, so a duration is never a number in a rule. */
   --cycle-eq:     1100ms;
@@ -522,12 +534,12 @@ body.swap-out .progress,
 body.swap-out .controls { animation: text-out var(--dur-exit-text) var(--ease-soft) calc(var(--dur-exit) * 0.15) both; }
 /* Every word waits for the artwork's head start, then takes its own step. The last one begins at
    0.12 + 0.20 = 0.32 of the half and runs 0.66, landing at 0.98 — inside it, with a little room. */
-body.swap-in .eyebrow  { animation: text-in var(--dur-text) var(--ease-out) var(--art-lead) both; }
-body.swap-in .title    { animation: text-in var(--dur-text) var(--ease-out) calc(var(--art-lead) + var(--dur-enter) * 0.05) both; }
-body.swap-in .artist   { animation: text-in var(--dur-text) var(--ease-out) calc(var(--art-lead) + var(--dur-enter) * 0.10) both; }
-body.swap-in .album    { animation: text-in var(--dur-text) var(--ease-out) calc(var(--art-lead) + var(--dur-enter) * 0.15) both; }
+body.swap-in .eyebrow  { animation: text-in var(--dur-text) var(--ease-arrive) var(--art-lead) both; }
+body.swap-in .title    { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.05) both; }
+body.swap-in .artist   { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.10) both; }
+body.swap-in .album    { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.15) both; }
 body.swap-in .progress,
-body.swap-in .controls { animation: text-in var(--dur-text) var(--ease-out) calc(var(--art-lead) + var(--dur-enter) * 0.20) both; }
+body.swap-in .controls { animation: text-in var(--dur-text) var(--ease-arrive) calc(var(--art-lead) + var(--dur-enter) * 0.20) both; }
 
 /* A swap in progress suspends the marquee: two animations on nested elements both moving is fine,
    but a title scrolling while its container is also sliding reads as a glitch. */

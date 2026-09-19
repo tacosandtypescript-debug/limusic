@@ -14,20 +14,29 @@
    little overshoot and settles. The resting tilt lives on `rotate`, a property of its own rather
    than part of `transform`, so these compose with it instead of fighting it: the animation only adds
    to the -2.5deg the design already carries. */
+/* The card drifts rather than tips.
+ *
+ * It used to leave at -4 degrees and arrive from +4, which is an eight-degree swing between the two
+ * halves — the artwork rocked one way and then the other on every change, and a rocking card reads as
+ * a jolt however long it is given. The rotation is a third of that now and the travel is longer, so
+ * what the eye follows is the movement and not the twist.
+ *
+ * The scale is gentler for the same reason, and the incoming fade now runs the whole way instead of
+ * finishing at 65%: a card that becomes fully opaque and *then* finishes sliding is a card that
+ * appears and then moves, which is two events. Fading across the move makes it one. */
 @keyframes sleeve-art-out {
   0%   { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
-  100% { opacity: 0; transform: translateY(7px) rotate(-4deg) scale(0.94); }
+  100% { opacity: 0; transform: translateY(10px) rotate(-1.4deg) scale(0.975); }
 }
 
 @keyframes sleeve-art-in {
-  0%   { opacity: 0; transform: translateY(-14px) rotate(4deg) scale(1.045); }
-  65%  { opacity: 1; }
+  0%   { opacity: 0; transform: translateY(-20px) rotate(1.4deg) scale(1.018); }
   100% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
 }
 
 body[data-design^="sleeve"].swap-out .art { animation: sleeve-art-out var(--dur-exit-art) var(--ease-soft) both; }
 
-body[data-design^="sleeve"].swap-in .art { animation: sleeve-art-in var(--dur-art) var(--ease-out) both; }
+body[data-design^="sleeve"].swap-in .art { animation: sleeve-art-in var(--dur-art) var(--ease-arrive) both; }
 
 body[data-design^="sleeve"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }
 
