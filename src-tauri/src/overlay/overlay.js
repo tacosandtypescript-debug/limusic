@@ -599,6 +599,18 @@ async function swapTo(track) {
   // instead. It is one background-image, set here and cleared at the end, and only while a swap is
   // in flight — the cost is a decoded image that is already in memory.
   if (el.cover.src) el.art.style.backgroundImage = `url("${el.cover.src}")`;
+  // And start the incoming cover decoding now, rather than at the midpoint.
+  //
+  // `paint` writes the words the instant the content changes, but `setCover` only repoints the image
+  // once the new one has decoded — deliberately, so a swap on `src` alone cannot repaint a blank
+  // frame. The two together mean that on a slow fetch the card reads as the new song above the old
+  // artwork. In OBS the cover comes through LiMusic's proxy, so there is always a fetch, and the
+  // outgoing half is 224ms of doing nothing but waiting.
+  //
+  // The request is the same one `setCover` will make a moment later, so a warm cache makes this free
+  // and a cold one has already started by the time it is needed. If it fails, nothing here cares —
+  // `setCover` still handles that, and still falls back to the music note.
+  if (track.thumbnail) { const warm = new Image(); warm.src = coverSrc(track.thumbnail); }
   body.classList.add("swap-out");
   await wait(T.exit);
   paint(track);

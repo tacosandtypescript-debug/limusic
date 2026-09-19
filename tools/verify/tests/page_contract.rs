@@ -574,12 +574,48 @@ fn a_track_change_is_sequenced() {
         );
     }
     // And the exit staggers too, or the content switches off instead of being replaced.
-    for frac in ["0.06", "0.10", "0.14", "0.18", "0.22"] {
-        assert!(
-            src.contains(&format!("calc(var(--dur-exit) * {frac})")),
-            "the exit stagger is missing the {frac} step"
-        );
+    //
+    // The steps are read rather than pinned, and their *shape* is checked: five of them, in
+    // increasing order, evenly spaced, and the last one small enough that the exit animation still
+    // fits inside the half it belongs to. The exact fractions are a tuning decision and have already
+    // moved once, from 0.06..0.22 to 0.03..0.15, to stop the card emptying out before the swap —
+    // pinning them made that deliberate change look like a regression.
+    let mut steps: Vec<f64> = Vec::new();
+    for line in src.lines() {
+        let line = line.trim();
+        if !line.starts_with("body.swap-out") || !line.contains("text-out") {
+            continue;
+        }
+        if let Some((_, rest)) = line.split_once("--dur-exit) * ") {
+            if let Some((v, _)) = rest.split_once(')') {
+                if let Ok(d) = v.trim().parse::<f64>() {
+                    steps.push(d);
+                }
+            }
+        }
     }
+    steps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    steps.dedup();
+    assert!(
+        steps.len() >= 4,
+        "the exit stagger has {} distinct steps, which is not a stagger",
+        steps.len()
+    );
+    assert!(
+        steps.windows(2).all(|w| w[1] > w[0]),
+        "the exit steps are not in order: {steps:?}"
+    );
+    let gaps: Vec<f64> = steps.windows(2).map(|w| w[1] - w[0]).collect();
+    let even = gaps.iter().cloned().fold(f64::INFINITY, f64::min) > 0.0
+        && (gaps.iter().cloned().fold(0.0_f64, f64::max)
+            - gaps.iter().cloned().fold(f64::INFINITY, f64::min))
+            < 0.005;
+    assert!(even, "the exit steps are not evenly spaced: {steps:?}");
+    assert!(
+        *steps.last().unwrap() < 0.30,
+        "the last exit step starts at {:.2} of the half, leaving no room to animate",
+        steps.last().unwrap()
+    );
     // The entrance plays once, on the first paint, and never again.
     assert!(src.contains("if (!booted)"), "the entrance must be one-shot");
 }
@@ -653,8 +689,28 @@ fn a_track_change_adds_up() {
     // The shape of the thing, which is what makes the arithmetic below possible.
     assert!(src.contains("--dur-exit:  calc(var(--dur-swap) * var(--exit-share))"));
     assert!(src.contains("--dur-enter: calc(var(--dur-swap) * (1 - var(--exit-share)))"));
-    assert!(src.contains("--dur-exit-art:  calc(var(--dur-exit) * 0.85)"));
-    assert!(src.contains("--dur-exit-text: calc(var(--dur-exit) * 0.68)"));
+    // Read out of the stylesheet rather than pinned as text. This test is named for the arithmetic
+    // and it was checking four literals, so when the exits were lengthened on purpose — to stop the
+    // card emptying out between the two halves — it failed on the change and not on the sum. The
+    // numbers below are the sums, and they are what the design actually promises.
+    let factor = |token: &str| -> f64 {
+        src.split_once(token)
+            .and_then(|(_, rest)| rest.split_once('*'))
+            .map(|(_, v)| v.trim())
+            .and_then(|v| v.split(')').next())
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0.0)
+    };
+    let exit_art_share = factor("--dur-exit-art:");
+    let exit_text_share = factor("--dur-exit-text:");
+    assert!(
+        (0.5..=1.0).contains(&exit_art_share),
+        "the artwork leaves over {exit_art_share:.2} of the outgoing half"
+    );
+    assert!(
+        (0.5..=1.0).contains(&exit_text_share),
+        "the words leave over {exit_text_share:.2} of it"
+    );
     assert!(src.contains("--dur-art:   min(440ms, calc(var(--dur-enter) * 0.95))"));
     assert!(src.contains("--dur-text:  min(320ms, calc(var(--dur-enter) * 0.66))"));
     assert!(src.contains("--art-lead:  calc(var(--dur-enter) * 0.12)"));
@@ -693,11 +749,53 @@ fn a_track_change_adds_up() {
     for (family, share) in &shares {
         let exit = swap * share;
         let enter = swap * (1.0 - share);
-        // Outgoing: the artwork first, then the words, both inside the half they belong to.
-        let exit_art = exit * 0.85;
-        let exit_tail = exit * 0.22 + exit * 0.68;
-        assert!(exit_art <= exit, "{family}: the artwork's exit ({exit_art:.0}ms) overruns --dur-exit");
-        assert!(exit_tail <= exit, "{family}: the exit stagger tail ({exit_tail:.0}ms) overruns --dur-exit");
+        // Outgoing. The point of the outgoing half is that nothing has finished leaving when the
+        // content changes: whatever is still moving when the swap happens is what keeps the card
+        // from reading as blank in the middle of a change. That is the assertion, and it is the one
+        // the old numbers failed — the artwork went at 0.85 and the words tailed out at 0.90, so the
+        // card was empty for the whole join. It looked like a coarse transition because it was one.
+        let exit_art = exit * exit_art_share;
+        assert!(
+            exit_art <= exit,
+            "{family}: the artwork's exit ({exit_art:.0}ms) overruns --dur-exit"
+        );
+        assert!(
+            exit - exit_art < 0.06 * exit,
+            "{family}: the artwork has finished leaving {:.0}ms before the content changes — the card \
+             empties out on the way in",
+            exit - exit_art
+        );
+
+        // The stagger, read from the stylesheet: the first delay and the last, and the animation
+        // they share. The last word must still be leaving at the moment of the swap.
+        let mut delays: Vec<f64> = Vec::new();
+        for line in src.lines() {
+            let line = line.trim();
+            if !line.starts_with("body.swap-out") || !line.contains("text-out") {
+                continue;
+            }
+            if let Some((_, rest)) = line.split_once("--dur-exit) * ") {
+                if let Some((v, _)) = rest.split_once(')') {
+                    if let Ok(d) = v.trim().parse::<f64>() {
+                        delays.push(d);
+                    }
+                }
+            }
+        }
+        assert!(delays.len() >= 4, "{family}: the exit stagger has {} steps", delays.len());
+        let first = delays.iter().cloned().fold(f64::INFINITY, f64::min);
+        let last = delays.iter().cloned().fold(0.0_f64, f64::max);
+        assert!(
+            first < last,
+            "{family}: the exit stagger ({first:.2}..{last:.2}) has no order to it"
+        );
+        let tail = exit * last + exit * exit_text_share;
+        assert!(tail <= exit + 0.5, "{family}: the exit tail ({tail:.0}ms) overruns --dur-exit");
+        assert!(
+            exit - tail < 0.06 * exit,
+            "{family}: the words finish leaving {:.0}ms before the content changes",
+            exit - tail
+        );
 
         // Incoming: the artwork leads, every word is delayed by the lead plus its own step.
         let art = 440.0_f64.min(enter * 0.95);
