@@ -49,6 +49,26 @@
 	 *  means "no preset": the design's own look. */
 	const PRESETS = ['default', 'minimal', 'card', 'glass', 'dynamic', 'vinyl'] as const;
 
+	/** Which surface each preset chooses, mirroring `PRESETS` in `overlay/page.html`.
+	 *
+	 *  A preset is a *bundle*, and the background is one of the things in it — not a separate
+	 *  control that happens to sit next to it. That is why both rows used to look like two ways of
+	 *  saying the same thing: "Glass" appeared in each, and the preset called "Card" produced a
+	 *  background called "Solid", with nothing on screen connecting them.
+	 *
+	 *  So picking a preset moves the background row to whatever the preset chose. It shows the
+	 *  relationship instead of describing it, and it makes the override obvious: choose a background
+	 *  afterwards and it stays where you put it, because an explicit `card` beats the preset's. */
+	const PRESET_CARD: Record<string, string> = {
+		minimal: 'transparent', card: 'solid', glass: 'glass', dynamic: 'translucent', vinyl: 'auto'
+	};
+
+	function choosePreset(p: string) {
+		preset = p;
+		const chosen = PRESET_CARD[p];
+		if (chosen) card = chosen;
+	}
+
 	const store = (k: string, d: string) => localStorage.getItem(k) ?? d;
 	let design = $state(store('overlay_design', 'sleeve-wide'));
 	let pos = $state(store('overlay_pos', 'bl'));
@@ -196,7 +216,7 @@
 						<button
 							type="button"
 							aria-pressed={preset === p}
-							onclick={() => (preset = p)}
+							onclick={() => choosePreset(p)}
 							class="cursor-pointer rounded-full border px-3 py-1 text-xs transition-colors {preset ===
 							p
 								? 'border-primary/60 bg-primary/15 text-foreground'

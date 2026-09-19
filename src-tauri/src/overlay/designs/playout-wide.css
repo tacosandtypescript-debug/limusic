@@ -1,0 +1,112 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   PLAYOUT-WIDE
+   ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+   Everything this overlay looks like. The shell, the script and the shared base
+   live one directory up and are used by all six; this file is what makes
+   playout-wide different from the other five.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Playout's typography, shared by both orientations ────────────────────────────────────────
+   A condensed broadcast face, uppercase titles, and monospace for anything numeric — the one family
+   where the numbers are set as data rather than as prose.
+
+   One rule with a family selector, not two with exact ones. It was two, they were identical when
+   written, and by the time anyone looked they were not: the wide title had picked up a hair of
+   tracking the tall one never got, which is a difference nobody would ever see and nobody could
+   ever find. This shape is the one the split's guard compares.
+
+   The title's *size* is deliberately not here — 28px against 26px — because the two compositions
+   are different sizes and a heading has to answer to the box it sits in. */
+body[data-design^="playout"] #now { font-family: Bahnschrift, "DIN Alternate", "Segoe UI Variable Display", "Segoe UI", sans-serif; }
+
+body[data-design^="playout"] .eyebrow {
+  color: var(--ink-3);
+  letter-spacing: 0.2em;
+}
+
+body[data-design^="playout"] .title {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+body[data-design^="playout"] .times, body[data-design^="playout"] .controls {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  letter-spacing: 0.06em;
+}
+
+/* Playout — the cover band is the size of a lower-third, so it changes the way a transmission does:
+   the incoming frame is *revealed by an edge travelling across it*, not pushed in from the side.
+   `clip-path` on the band is what makes that read as a wipe, and the small scale keeps the artwork
+   from looking frozen while it happens.
+
+   Opacity stays at 1 throughout on purpose. A wipe that also fades is two effects doing one job, and
+   the moment it fades it stops reading as a mixer and starts reading as a dissolve. */
+@keyframes playout-art-out {
+  0%   { clip-path: inset(0 0 0 0); transform: scale(1); }
+  100% { clip-path: inset(0 100% 0 0); transform: scale(1.03); }
+}
+
+@keyframes playout-art-in {
+  0%   { clip-path: inset(0 0 0 100%); transform: scale(1.03); }
+  100% { clip-path: inset(0 0 0 0); transform: scale(1); }
+}
+
+@keyframes wipe {
+  0%   { opacity: 0.5; transform: translateX(-100%); }
+  100% { opacity: 0;   transform: translateX(100%); }
+}
+
+body[data-design^="playout"].swap-out .art { animation: playout-art-out var(--dur-exit-art) var(--ease-soft) both; }
+
+body[data-design^="playout"].swap-in .art { animation: playout-art-in var(--dur-art) var(--ease-out) both; }
+
+body[data-design^="playout"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }/* ═══════════════════════════════════════════════════════════════════════════════════════════════ OVERLAY 3 · PLAYOUT-WIDE — 760 × 222 A broadcast lower-third. Bahnschrift (DIN-flavoured, ships with Windows) for the plate, Cascadia Mono for the timecode, and progress drawn as a hard-edged ticker — the difference between a media player and a transmission chain. ═══════════════════════════════════════════════════════════════════════════════════════════════ */ body[data-design="playout-wide"] #now {
+  --pad: 20px;
+  --card-radius: 0px;
+  padding: 0;
+  gap: 0;
+  background: none;
+  border: 0;
+  box-shadow: var(--card-shadow);
+  align-items: stretch;
+}/* A square band filling the box's full height, derived from the base rather than given its own number — one size, so the two cannot disagree. */ body[data-design="playout-wide"] .art {
+  width: var(--base-h);
+  height: 100%;
+  border-radius: 0;
+}body[data-design="playout-wide"] .art img, body[data-design="playout-wide"] .art .fallback { border-radius: 0; }body[data-design="playout-wide"] .meta {
+  flex: 1 1 auto;
+  padding: 14px var(--pad) 18px;
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border-block: var(--card-edge);
+  border-inline-end: var(--card-edge);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.2);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 var(--accent-soft);
+}/* The wipe: one sweep of accent across the plate as the new track arrives. Driven by the same `swap-in` the rest of the sequence uses — the old build triggered this from a separate `is-new` class that nothing set any more, so it had been dead code. */ body[data-design="playout-wide"] .meta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 20%, var(--accent) 50%, transparent 80%);
+  opacity: 0;
+  transform: translateX(-100%);
+}body[data-design="playout-wide"].swap-in .meta::after { animation: wipe var(--dur-swap) var(--ease-out); }body[data-design="playout-wide"] .eyebrow::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 calc(8px * var(--glow)) var(--accent);
+}body[data-design="playout-wide"].paused .eyebrow::before {
+  background: var(--ink-3);
+  box-shadow: none;
+}body[data-design="playout-wide"] .eq i { background: var(--ink-3); }body[data-design="playout-wide"] .title { font-size: 28px; }/* The ticker used to be pinned with `position: absolute; bottom: 0`, on the theory that its containing block would be the plate. It never was: it resolved against an ancestor whose bottom happened to sit on the timestamps row, so the line rendered one pixel under the numbers — measured on a capture, times 133-140 and line 141. In the flow now, where it lands is a value rather than a consequence. */ body[data-design="playout-wide"] .bar {
+  position: static;
+  height: 3px;
+  border-radius: 0;
+  background: oklch(1 0 0 / 12%);
+}body[data-design="playout-wide"] .fill { border-radius: 0; }/* A hard rule needs no scrubber dot; the ticker's own leading edge is the marker. */ body[data-design="playout-wide"] .fill::after { display: none; }body[data-design="playout-wide"] .fill::before { background-image: none; }body[data-design="playout-wide"] .times { margin-top: 12px; }
+

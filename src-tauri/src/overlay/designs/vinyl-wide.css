@@ -1,0 +1,128 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   VINYL-WIDE
+   ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+   Everything this overlay looks like. The shell, the script and the shared base
+   live one directory up and are used by all six; this file is what makes
+   vinyl-wide different from the other five.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* Vinyl — the physical one. The record winds down as the swap begins (the spin loop reads the
+   `swapping` state, not a CSS animation), drifts and turns a little as it leaves, and the new one
+   arrives slowly and is still gathering speed when the text settles. */
+@keyframes vinyl-art-out { to { opacity: 0; transform: translateX(-9%) rotate(-14deg) scale(0.97); } }
+
+@keyframes vinyl-art-in { from { opacity: 0; transform: translateX(11%) rotate(16deg) scale(0.97); } }
+
+body[data-design^="vinyl"].swap-out .art { animation: vinyl-art-out var(--dur-exit-art) var(--ease-soft) both; }
+
+body[data-design^="vinyl"].swap-in .art { animation: vinyl-art-in var(--dur-art) var(--ease-out) both; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 5 · VINYL-WIDE — 680 × 230
+   Typography first. No plate at all in `auto`: a soft scrim under the words, the cover turning like
+   a record, progress as a ring around it. The quietest of the six.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="vinyl-wide"] #now {
+  --art: 132px;
+  --title: 38px;
+  --gap: 26px;
+  --card-radius: 20px;
+  padding: 0; background: none; border: 0; box-shadow: none;
+  isolation: isolate;
+}
+
+/* The shape is the load-bearing decision, and it took two attempts to get right.
+
+   A first version centred a small radial on the box, which put its strongest part behind the record
+   and its weakest behind the words — backwards. A second added a masked `backdrop-filter`; on a
+   light background that produced a grey smear and left white text on mid-grey, worse than nothing.
+   What is here is one *wide* ellipse anchored over the text: strong across the whole word block,
+   fading well before the record and before the edges, so the scene falls away behind the title
+   instead of a panel being laid over it.
+
+   In an explicit `card` mode the scrim is replaced by a real surface — see the rule below. */
+body[data-design^="vinyl"] #now::before {
+  content: ""; position: absolute; inset: -14% -10%; z-index: -1; pointer-events: none;
+  background: radial-gradient(140% 180% at 76% 50%,
+    oklch(0 0 0 / 88%) 0%, oklch(0 0 0 / 78%) 52%,
+    oklch(0 0 0 / 30%) 82%, transparent 100%);
+  opacity: var(--card-scrim, 1);
+  transition: opacity var(--dur-color) var(--ease-out);
+}
+
+/* Choosing a card mode means choosing a surface, so the shaped scrim gives way to it. */
+body:not([data-card="auto"])[data-design^="vinyl"] #now::before {
+  inset: 0;
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border: var(--card-edge);
+  border-radius: var(--card-radius);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.1);
+  opacity: 1;
+}
+
+body[data-design^="vinyl"] .art {
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+body[data-design^="vinyl"] .art::before {
+  content: "";
+  position: absolute;
+  inset: -22%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, oklch(0 0 0 / 62%), transparent 78%);
+}
+
+body[data-design^="vinyl"] .art img {
+  border-radius: 50%;
+  rotate: var(--spin, 0deg);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent), transparent 40%),
+              0 18px 40px -14px oklch(0 0 0 / 80%),
+              0 0 calc(22px * var(--glow)) color-mix(in oklab, var(--accent), transparent 65%);
+}
+
+/* Spindle hole, so it reads as a record and not a round photo. */
+body[data-design^="vinyl"] .art::after {
+  content: ""; position: absolute; width: 13%; height: 13%; border-radius: 50%;
+  background: oklch(0.145 0.008 285); box-shadow: inset 0 0 0 1px oklch(1 0 0 / 18%);
+}
+
+body[data-design^="vinyl"] .ring {
+  position: absolute;
+  inset: -9%;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--p, 0) * 1turn), var(--hair) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+}
+
+body[data-design^="vinyl"] .eyebrow, body[data-design^="vinyl"] .bar, body[data-design^="vinyl"] .controls { display: none; }
+
+body[data-design^="vinyl"] .title {
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  text-shadow: 0 1px 3px oklch(0 0 0 / 92%), 0 4px 28px oklch(0 0 0 / 88%);
+}
+
+body[data-design^="vinyl"] .artist {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  text-shadow: 0 1px 3px oklch(0 0 0 / 92%), 0 2px 16px oklch(0 0 0 / 88%);
+}
+
+body[data-design^="vinyl"] .album, body[data-design^="vinyl"] .times {
+  text-shadow: 0 1px 3px oklch(0 0 0 / 92%), 0 2px 14px oklch(0 0 0 / 88%);
+}
+
+body[data-design="vinyl-wide"] .artist { font-size: 14px; }
+
+body[data-design="vinyl-wide"] .times {
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+}
+

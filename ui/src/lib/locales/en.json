@@ -561,7 +561,7 @@
 			"card_translucent": "Translucent",
 			"card_glass": "Glass",
 			"preset": "Preset",
-			"preset_hint": "A starting point that sets the background, the glow and the shadows together.",
+			"preset_hint": "A bundle, not a separate control: it sets several things at once — the background among them. Pick a background afterwards and yours wins over the preset's.",
 			"preset_default": "None",
 			"preset_minimal": "Minimal",
 			"preset_card": "Card",

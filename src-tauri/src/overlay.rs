@@ -47,14 +47,16 @@ use crate::state::AppState;
 pub const KEY_PORT: &str = "overlay_port";
 pub const KEY_TOKEN: &str = "overlay_token";
 
-/// Where the overlay listens unless the user moves it. High and unremarkable, away from the ports
-/// dev servers reach for (3000, 5173, 1420…).
-pub const DEFAULT_PORT: u16 = 8799;
+mod routing;
 
-/// The page, embedded so the binary is self-contained — the overlay has to work from an installed
-/// build with no repo next to it.
-const PAGE: &str = include_str!("overlay/page.html");
+// The pure half — routing, the token gate, the artwork allowlist — lives in its own file so its
+// tests can run without a Tauri app or a socket. See `overlay/routing.rs`.
+use routing::{
+    asset, cover_allowed, normalize_cover, route, Action, Route, DEFAULT_PORT, MAX_CONTROL_BYTES,
+    PAGE,
+};
 
+/// What every response is built from.
 type ResBody = Full<Bytes>;
 
 static ENDPOINT: OnceLock<Endpoint> = OnceLock::new();
@@ -199,109 +201,6 @@ pub fn overlay_info() -> OverlayInfo {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum Route {
-    Page,
-    State,
-    /// `POST` with `{"action": "…"}`. What makes the overlay's transport buttons real.
-    Control,
-    /// Artwork, fetched by us and handed to the overlay. See [`cover_allowed`].
-    Cover,
-    /// `/token` with no trailing slash. Redirected rather than served, so the page's own relative
-    /// URLs and the browser's idea of the base stay in agreement.
-    Redirect,
-}
-
-/// Turn what YouTube hands us into something fetchable, or `None` if it is unusable.
-///
-/// InnerTube returns thumbnails as absolute `https://` URLs today, but it also returns
-/// **protocol-relative** ones (`//lh3.googleusercontent.com/…`) and has for years. Handed to an
-/// `Image` from a `file://` page, `//host/path` resolves to `file://host/path` and fails with
-/// nothing a page can report — which is exactly what "the cover does not load" looks like.
-fn normalize_cover(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    match trimmed.strip_prefix("//") {
-        Some(rest) => Some(format!("https://{rest}")),
-        None => Some(trimmed.to_owned()),
-    }
-}
-
-/// Which hosts artwork may be fetched from.
-///
-/// `/cover` takes a URL, so without this it would be an open proxy: anything able to reach the port
-/// could make LiMusic fetch an arbitrary address, including one inside the local network. This is
-/// the set YouTube Music actually serves thumbnails from.
-///
-/// Pure, so the rule is testable without a socket.
-fn cover_allowed(url: &str) -> Option<reqwest::Url> {
-    let parsed = reqwest::Url::parse(url).ok()?;
-    // https only: plain http would be a downgrade we do not need.
-    if parsed.scheme() != "https" {
-        return None;
-    }
-    let host = parsed.host_str()?;
-    let ok = ["googleusercontent.com", "ggpht.com", "ytimg.com"]
-        .iter()
-        .any(|d| host == *d || host.ends_with(&format!(".{d}")));
-    ok.then_some(parsed)
-}
-
-/// The three things the overlay can ask for. A closed set, parsed rather than passed through: this
-/// endpoint is reachable by any local process that knows the token, so it must not be a general
-/// "call a method by name" hole.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Action {
-    Prev,
-    Next,
-    Toggle,
-}
-
-impl Action {
-    fn parse(raw: &str) -> Option<Action> {
-        match raw {
-            "prev" => Some(Action::Prev),
-            "next" => Some(Action::Next),
-            "toggle" => Some(Action::Toggle),
-            _ => None,
-        }
-    }
-}
-
-/// The largest control body worth reading. The real one is ~25 bytes; anything larger is either a
-/// mistake or someone probing, and buffering it unbounded is the one way this endpoint could be
-/// made to cost memory.
-const MAX_CONTROL_BYTES: usize = 1024;
-
-/// Split a request path into a route, refusing anything whose token does not match.
-///
-/// Pure, so the token check — the only thing standing between a local process and the endpoint —
-/// is testable without opening a socket.
-fn route(path: &str, token: &str) -> Option<Route> {
-    if token.is_empty() {
-        return None;
-    }
-    let rest = path.strip_prefix('/')?;
-    match rest.split_once('/') {
-        // "/<token>"
-        None => (rest == token).then_some(Route::Redirect),
-        Some((t, tail)) => {
-            if t != token {
-                return None;
-            }
-            match tail {
-                "" | "index.html" => Some(Route::Page),
-                "state" => Some(Route::State),
-                "control" => Some(Route::Control),
-                "cover" => Some(Route::Cover),
-                _ => None,
-            }
-        }
-    }
-}
-
 fn body(bytes: Bytes) -> ResBody {
     Full::new(bytes)
 }
@@ -363,6 +262,13 @@ async fn handle(
             // check is actually asking for.
             let bytes: &'static [u8] = if method == Method::HEAD { b"" } else { PAGE.as_bytes() };
             Ok(respond(StatusCode::OK, "text/html; charset=utf-8", bytes))
+        }
+
+        Route::Asset(name) if readable => {
+            let (_, text, ctype) = asset(name).ok_or(StatusCode::NOT_FOUND)?;
+            // HEAD gets the headers without the body, as the page does.
+            let bytes: &'static [u8] = if method == Method::HEAD { b"" } else { text.as_bytes() };
+            Ok(respond(StatusCode::OK, ctype, bytes))
         }
 
         Route::State if readable => {
@@ -443,143 +349,6 @@ struct ControlRequest {
 mod tests {
     use super::*;
 
-    const T: &str = "abc123def456abc1";
-
-    /// The token is the only thing keeping another local process off the endpoint, so a wrong or
-    /// missing one has to miss — for every shape of path.
-    #[test]
-    fn only_the_right_token_routes() {
-        assert_eq!(route(&format!("/{T}/"), T), Some(Route::Page));
-        assert_eq!(route(&format!("/{T}/state"), T), Some(Route::State));
-        assert_eq!(route("/wrongtoken000000/", T), None);
-        assert_eq!(route("/", T), None);
-        assert_eq!(route("/state", T), None);
-        assert_eq!(route(T, T), None);
-        // A token that is a prefix of the path must not match by prefix.
-        assert_eq!(route(&format!("/{T}extra/"), T), None);
-        assert_eq!(route(&format!("/{T}extra/state"), T), None);
-    }
-
-    /// An empty token would make every path a match, so the guard has to reject it outright rather
-    /// than fall through to a comparison that succeeds for `"/"`.
-    #[test]
-    fn an_empty_token_routes_nothing() {
-        assert_eq!(route("/", ""), None);
-        assert_eq!(route("//", ""), None);
-        assert_eq!(route("//state", ""), None);
-    }
-
-    /// `/token` without the slash is a redirect, so a hand-typed link works and the page keeps a
-    /// consistent base for its own relative URLs.
-    #[test]
-    fn a_bare_token_redirects() {
-        assert_eq!(route(&format!("/{T}"), T), Some(Route::Redirect));
-    }
-
-    #[test]
-    fn unknown_paths_under_a_valid_token_are_not_found() {
-        assert_eq!(route(&format!("/{T}/../secret"), T), None);
-        assert_eq!(route(&format!("/{T}/favicon.ico"), T), None);
-        assert_eq!(route(&format!("/{T}/state/extra"), T), None);
-        assert_eq!(route(&format!("/{T}/control/../state"), T), None);
-    }
-
-    /// `/cover` fetches a URL from a query parameter, so the host allowlist is the only thing
-    /// between it and an open proxy — including one that could reach addresses inside the local
-    /// network. Every rejection path matters more than the accept path.
-    #[test]
-    fn cover_only_fetches_youtube_artwork_hosts() {
-        for good in [
-            "https://lh3.googleusercontent.com/abc=w544-h544",
-            "https://yt3.ggpht.com/xyz",
-            "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
-            "https://googleusercontent.com/a",
-        ] {
-            assert!(cover_allowed(good).is_some(), "{good} should be allowed");
-        }
-        for bad in [
-            // Not the allowlisted domains.
-            "https://example.com/a.jpg",
-            "https://evil-googleusercontent.com.attacker.net/a",
-            "https://notgoogleusercontent.com/a",
-            // Plain http: a downgrade we do not need.
-            "http://lh3.googleusercontent.com/a",
-            // The classic SSRF targets.
-            "http://127.0.0.1:8799/secret",
-            "https://localhost/admin",
-            "https://169.254.169.254/latest/meta-data/",
-            "file:///C:/Windows/win.ini",
-            "data:image/svg+xml,<svg/>",
-            // Nonsense.
-            "",
-            "not a url",
-        ] {
-            assert!(cover_allowed(bad).is_none(), "{bad} must be refused");
-        }
-    }
-
-    /// Protocol-relative thumbnails are the whole reason this exists: off a `file://` page they
-    /// resolve to `file://host/…` and fail with nothing a page can report.
-    #[test]
-    fn protocol_relative_covers_become_https() {
-        assert_eq!(
-            normalize_cover("//lh3.googleusercontent.com/a=b").as_deref(),
-            Some("https://lh3.googleusercontent.com/a=b")
-        );
-        // Absolute URLs pass through untouched, including their query strings.
-        assert_eq!(
-            normalize_cover("https://i.ytimg.com/vi/x/hq.jpg?sqp=1").as_deref(),
-            Some("https://i.ytimg.com/vi/x/hq.jpg?sqp=1")
-        );
-        // Whitespace from a pasted or hand-edited value.
-        assert_eq!(
-            normalize_cover("  https://lh3.googleusercontent.com/a  ").as_deref(),
-            Some("https://lh3.googleusercontent.com/a")
-        );
-        assert_eq!(normalize_cover(""), None);
-        assert_eq!(normalize_cover("   "), None);
-    }
-
-    /// A `//host` that is not on the allowlist must still be refused after normalisation — the two
-    /// checks compose, and either one alone would leave a hole.
-    #[test]
-    fn normalisation_does_not_bypass_the_allowlist() {
-        let normalized = normalize_cover("//169.254.169.254/latest/meta-data/").unwrap();
-        assert_eq!(normalized, "https://169.254.169.254/latest/meta-data/");
-        assert!(cover_allowed(&normalized).is_none());
-    }
-
-    #[test]
-    fn the_control_endpoint_routes() {
-        assert_eq!(route(&format!("/{T}/control"), T), Some(Route::Control));
-        // And it is behind the same token as everything else.
-        assert_eq!(route("/wrongtoken000000/control", T), None);
-    }
-
-    /// The control endpoint is reachable by any local process holding the token, so the action set
-    /// is closed and parsed — never a name passed through to a dispatcher.
-    #[test]
-    fn only_the_three_known_actions_parse() {
-        assert_eq!(Action::parse("prev"), Some(Action::Prev));
-        assert_eq!(Action::parse("next"), Some(Action::Next));
-        assert_eq!(Action::parse("toggle"), Some(Action::Toggle));
-        for bad in ["", "NEXT", "Next", "play", "shutdown", "__proto__", "next; rm -rf /"] {
-            assert_eq!(Action::parse(bad), None, "{bad:?} must not parse");
-        }
-    }
-
-    /// A body larger than the threshold is refused instead of buffered.
-    #[test]
-    fn the_control_body_is_bounded() {
-        assert!(MAX_CONTROL_BYTES >= 64, "too small to hold a real request");
-        assert!(MAX_CONTROL_BYTES <= 8 * 1024, "too large to be a real boundary");
-        // A real request is ~25 bytes, comfortably inside.
-        let real = br#"{"action":"toggle"}"#;
-        assert!(real.len() < MAX_CONTROL_BYTES);
-    }
-
-    /// The page must never be cached: a streamer refreshing the browser source has to get the
-    /// build that is actually running.
     #[test]
     fn responses_are_not_cacheable() {
         let html = respond(StatusCode::OK, "text/html; charset=utf-8", PAGE.as_bytes());
@@ -591,50 +360,6 @@ mod tests {
         assert_eq!(state.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
     }
 
-    /// The page is shipped from the binary, so a missing or truncated file is a build-time problem
-    /// that would otherwise only show up as a blank overlay on stream. Pin the parts it needs.
-    #[test]
-    fn the_embedded_page_is_intact() {
-        assert!(PAGE.len() > 8_000, "page looks truncated: {} bytes", PAGE.len());
-        // All three designs must be reachable by the query parameter the Settings panel sends.
-        for design in ["sleeve", "playout", "vinyl"] {
-            assert!(PAGE.contains(design), "page has no {design} design");
-        }
-        // The four knobs the link exposes, and the two properties that make it an overlay at all.
-        for needle in ["design", "pos", "scale", "demo"] {
-            assert!(PAGE.contains(needle), "page does not read {needle}");
-        }
-        assert!(PAGE.contains("background: transparent"), "the overlay must not paint a backdrop");
-        assert!(PAGE.contains("prefers-reduced-motion"), "motion must be suppressed on request");
-        // Polling has to be built from the page's own path, because the endpoint lives under the
-        // token (`/<token>/state`) — a bare `/state` fetch silently 404s and the overlay stays blank.
-        assert!(
-            PAGE.contains(r#"location.pathname.replace"#),
-            "the state URL must be derived from the page's own path"
-        );
-        assert!(!PAGE.contains(r#"fetch("/state""#), "a bare /state fetch would miss the token");
-    }
-
-    /// A port below 1024 needs privileges on some systems and collides with well-known services, so
-    /// the stored value is filtered rather than trusted.
-    #[test]
-    fn unusable_stored_ports_fall_back_to_the_default() {
-        let pick = |raw: Option<&str>| {
-            raw.and_then(|p| p.trim().parse::<u16>().ok())
-                .filter(|p| *p > 1023)
-                .unwrap_or(DEFAULT_PORT)
-        };
-        assert_eq!(pick(None), DEFAULT_PORT);
-        assert_eq!(pick(Some("")), DEFAULT_PORT);
-        assert_eq!(pick(Some("not a port")), DEFAULT_PORT);
-        assert_eq!(pick(Some("80")), DEFAULT_PORT, "privileged");
-        assert_eq!(pick(Some("1023")), DEFAULT_PORT, "still privileged");
-        assert_eq!(pick(Some("9000")), 9000);
-        assert_eq!(pick(Some("  9123  ")), 9123);
-    }
-
-    /// `bind` on a port that is already taken must fall through to an ephemeral one instead of
-    /// leaving the streamer with no overlay and no explanation.
     #[test]
     fn a_busy_port_falls_back_instead_of_failing() {
         let held = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();

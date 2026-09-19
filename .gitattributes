@@ -1,0 +1,11 @@
+# Line endings, pinned where they are load-bearing.
+#
+# `core.autocrlf = true` on Windows rewrites every text file to CRLF on checkout. For most of the
+# repo that is harmless. For these it is not: the overlay page is read with `include_str!` and the
+# contract tests match text inside it, so the same commit has to produce the same bytes on a Windows
+# checkout and a macOS one.
+#
+# Pinning LF here means the tests are testing the file, not the machine that checked it out.
+
+src-tauri/src/overlay/** text eol=lf
+tools/** text eol=lf

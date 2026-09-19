@@ -1,0 +1,106 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   SLEEVE-TALL
+   ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+   Everything this overlay looks like. The shell, the script and the shared base
+   live one directory up and are used by all six; this file is what makes
+   sleeve-tall different from the other five.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* Sleeve — an internal update, but a physical one. The design's whole idea is a record in its
+   cover, set down at an angle, and a plain `scale` was the one gesture that said nothing about it.
+
+   Instead the outgoing cover tips back and drops away, and the incoming one lands from above with a
+   little overshoot and settles. The resting tilt lives on `rotate`, a property of its own rather
+   than part of `transform`, so these compose with it instead of fighting it: the animation only adds
+   to the -2.5deg the design already carries. */
+@keyframes sleeve-art-out {
+  0%   { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translateY(7px) rotate(-4deg) scale(0.94); }
+}
+
+@keyframes sleeve-art-in {
+  0%   { opacity: 0; transform: translateY(-14px) rotate(4deg) scale(1.045); }
+  65%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
+}
+
+body[data-design^="sleeve"].swap-out .art { animation: sleeve-art-out var(--dur-exit-art) var(--ease-soft) both; }
+
+body[data-design^="sleeve"].swap-in .art { animation: sleeve-art-in var(--dur-art) var(--ease-out) both; }
+
+body[data-design^="sleeve"] .art img { animation: breathe var(--cycle-breathe) ease-in-out infinite; }
+
+body[data-design^="sleeve"] #now::before, body[data-design^="sleeve"] #now::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  border-radius: 50%;
+  filter: blur(72px) saturate(var(--glow-sat)) brightness(0.85);
+  transition: opacity var(--dur-color) var(--ease-out);
+}
+
+/* The ambient light is the artwork, blurred and oversized, and it is the largest area of colour in
+   the overlay — which is why it cannot be allowed to change in one frame.
+
+   It has to be two layers. `background-image` is not an animatable property, so a single layer with
+   a `transition: opacity` on it never actually transitioned anything: the opacity did not change on
+   a track change, the image did, and the card snapped from one colour to the next while the accent
+   beside it was still carefully blending. `setGlow()` puts the new artwork on whichever layer is
+   currently invisible and then swaps which of the two is showing. */
+body[data-design^="sleeve"] #now::before {
+  inset: -20%;
+  background-image: var(--cover-a);
+  opacity: calc(var(--glow) * var(--glow-wash) * var(--glow-a));
+}
+
+body[data-design^="sleeve"] #now::after {
+  inset: -18%;
+  background-image: var(--cover-b);
+  opacity: calc(var(--glow) * var(--glow-wash) * var(--glow-b));
+}
+
+body[data-design^="sleeve"]:not(.has-art) #now::before, body[data-design^="sleeve"]:not(.has-art) #now::after { opacity: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   OVERLAY 2 · SLEEVE-TALL — 380 × 430
+   The same object, stood up: cover above, words below, centred. It is a separate overlay and not a
+   narrow rendering of the wide one — the stacking is part of this design, not a reaction to a
+   container that got thin.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+body[data-design="sleeve-tall"] #now {
+  --art: 190px;
+  --card-radius: 26px;
+  padding: 26px;
+  background: var(--card-bg);
+  background-image: var(--card-sheen);
+  border: var(--card-edge);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow), inset 0 1px 0 oklch(1 0 0 / 8%);
+  backdrop-filter: blur(var(--card-blur)) saturate(1.25);
+  isolation: isolate;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+body[data-design="sleeve-tall"] .art {
+  border-radius: 8px;
+  rotate: -2deg;
+  box-shadow: 0 18px 34px -12px oklch(0 0 0 / 75%),
+              0 0 calc(16px * var(--glow)) color-mix(in oklab, var(--accent), transparent 40%);
+}
+
+body[data-design="sleeve-tall"] .art img { border-radius: 8px; }
+
+body[data-design="sleeve-tall"] .eyebrow {
+  justify-content: center;
+  margin-top: 20px;
+}
+
+body[data-design="sleeve-tall"] .controls { justify-content: center; }
+
