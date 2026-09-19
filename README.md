@@ -26,6 +26,16 @@ browser runtime, no backend server, no ads in the audio. It started as a desktop
 playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android
 YouTube Music client, and grew from there.
 
+> ### This is a fork
+>
+> It adds **Twitch integration** and an **OBS overlay system** on top of upstream `v0.7.3`.
+> Everything below about the app itself is upstream's work and theirs to maintain — the original is
+> [SimoHypers/limusic](https://github.com/SimoHypers/limusic).
+>
+> The download table further down describes *upstream's* artifacts. This fork publishes a
+> **Windows x64 installer only**, unsigned and without updater artifacts:
+> [Releases](https://github.com/tacosandtypescript-debug/limusic/releases).
+
 </div>
 
 ---
@@ -52,6 +62,8 @@ YouTube Music client, and grew from there.
 - **Six languages**: English, Spanish, French, Turkish, Brazilian Portuguese and Indonesian, with more in progress
 - **Self-updating builds** (AppImage on Linux, setup.exe on Windows, .app on macOS)
 - **Make it yours**: accent palettes, custom colors, your own fonts, corner roundness, a custom app icon, and an adaptive theme that recolors the app from the playing cover
+- **Twitch**: connect your own Twitch account from Settings, as the groundwork for viewers asking for songs from chat
+- **OBS overlays**: six now-playing cards served over loopback, a copyable browser-source link, accents taken from the artwork, and four card backgrounds
 
 ---
 
@@ -65,6 +77,9 @@ YouTube Music client, and grew from there.
   <tr>
     <td><img src="website/src/assets/screen-album.webp" alt="An album page, colors adapted to the cover"></td>
     <td><img src="website/src/assets/screen-video.webp" alt="A music video playing with lyrics alongside"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="website/src/assets/screen-overlay-landscape.webp" alt="The three landscape OBS overlays: Sleeve, Playout and Vinyl"></td>
   </tr>
 </table>
 
@@ -114,6 +129,66 @@ LIMUSIC_LASTFM_API_SECRET=your_secret
 
 Without that file everything else still builds and runs; the Last.fm button just
 reports that it isn't configured.
+
+---
+
+## OBS Overlays
+
+Six now-playing cards, served by the app on loopback and dropped into OBS as a browser source. Each
+one is a separate overlay with its own fixed composition: setting the source to the card's base size
+renders it 1:1, and any other size scales the whole card proportionally rather than rearranging it.
+
+<table>
+  <tr>
+    <td><img src="website/src/assets/screen-overlay-landscape.webp" alt="The three landscape overlays: Sleeve, Playout and Vinyl"></td>
+  </tr>
+  <tr>
+    <td><img src="website/src/assets/screen-overlay-portrait.webp" alt="The three stacked overlays: Sleeve, Playout and Vinyl"></td>
+    <td><img src="website/src/assets/screen-overlay-modes.webp" alt="The same overlay with design-default, transparent, solid, translucent and glass backgrounds"></td>
+  </tr>
+</table>
+
+| Overlay | Base size | | Overlay | Base size |
+|---|---|---|---|---|
+| Sleeve · horizontal | 620 × 200 | | Sleeve · vertical | 380 × 430 |
+| Playout · horizontal | 760 × 222 | | Playout · vertical | 380 × 430 |
+| Vinyl · horizontal | 680 × 230 | | Vinyl · vertical | 400 × 470 |
+
+- **The accent comes from the artwork.** The dominant colour is corrected into a band that stays
+  legible on a dark card, and falls back to the design's own crimson when there is no cover or the
+  canvas cannot be read.
+- **Four backgrounds** — the design's own, transparent, solid, translucent or glass — plus presets,
+  so the same overlay sits on gameplay, a bright title card, or footage in its own colours.
+- **A sequenced track change**: the old content leaves, the artwork changes while it is invisible,
+  and the new one arrives with an animation written for that design. The record winds down and back
+  up instead of stopping dead.
+- **Served on loopback behind a token**, so nothing outside the machine can reach it, and the cover
+  proxy refuses any host but Google's image hosts over `https`.
+
+Settings ▸ Overlay has a live preview, the copyable link and the OBS steps.
+
+<img src="website/src/assets/screen-overlay-settings.webp" alt="The Overlay settings panel, with a live preview of the selected overlay and its base size" width="80%">
+
+---
+
+## Twitch
+
+Connect your own Twitch account from Settings. This is the first step towards viewers asking for
+songs and controlling playback from chat — the connection is here, the commands are not yet.
+
+<img src="website/src/assets/screen-twitch.webp" alt="The Twitch settings panel" width="80%">
+
+- **Device Code Grant**: no client secret and no redirect URI, so there is nothing to register beyond
+  a client ID. A revoke from Twitch's side is picked up rather than ignored.
+- **EventSub over WebSocket**, with keepalive, reconnect with backoff, and dedupe by message id, so a
+  dropped connection says why and a repeated message is only acted on once.
+- **The panel lists exactly which permissions were granted**, so it is visible what LiMusic can and
+  cannot do on your behalf.
+- **Bring your own client ID** — paste one in Settings to override the one built into the release.
+
+**Not in yet**: chat commands (`!song`, `!skip`, `!play`, `!queue`, `!remove`, `!volume`),
+channel-point rewards, permissions, cooldowns, and the separate request queue. The plumbing is
+there; nothing listens to chat.
 
 ---
 
