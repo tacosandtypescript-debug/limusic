@@ -478,23 +478,6 @@ function setCover(raw) {
   // cover that changes on its own — a late thumbnail, a failure — not for one the sequence owns.
   if (!swapping) el.cover.classList.add("swapping");
   const next = new Image();
-  // During a track change the src goes in now rather than when the fetch lands, and that reversal is
-  // the fix for a wipe that wiped from the old cover to the old cover.
-  //
-  // The src was only ever set from `onload` so a swap could not repaint a blank frame on the way in.
-  // That reasoning held while the image was the only thing in the slot. It is not any more: the
-  // artwork's band now holds the outgoing cover as its background, so the slot is never empty and
-  // there is nothing left to wait for. Waiting anyway meant the wipe — a `clip-path` on a fixed
-  // timeline — ran over an image that had not changed yet, revealing the background, which was the
-  // same cover. Nothing moved for 650ms and then the picture jumped.
-  //
-  // `setGlow` and the accent still wait for the load, because both of those read the pixels.
-  if (swapping && url) {
-    el.cover.src = url;
-    el.cover.classList.remove("swapping");
-    el.art.classList.add("has-art");
-    body.classList.add("has-art");
-  }
   next.onload = next.onerror = () => {
     // `onerror` lands here too, which is the point: a cover that cannot be fetched leaves the
     // music note rather than an empty square — and the src is dropped, or the browser paints its
@@ -608,54 +591,56 @@ let swapping = false;
 async function swapTo(track) {
   if (swapping) { paint(track); return; }   // two changes inside one sequence: update, don't queue
   swapping = true;
-  // Pin the cover that is on screen right now, so the incoming artwork has something to be revealed
-  // *against*.
+
+  // Pin the cover that is on screen right now, so the incoming artwork is revealed *against* it.
   //
-  // This is the white square. `clip-path` clips a layer and shows whatever is behind it — and behind
-  // the artwork there was nothing at all, so every track change opened a hole in the cover and let
-  // the scene through. In the preview that hole is white, because the window behind it is; on stream
-  // it is the gameplay, flashing inside the album art. A mixer's wipe has two sources, one leaving
-  // as the other arrives. This one had a single layer and a pair of scissors.
+  // `clip-path` clips a layer and shows whatever is behind it, and behind the artwork there was
+  // nothing, so every track change opened a hole in the cover and let the scene through — a white
+  // square in the preview and the gameplay on stream. A mixer's wipe has two sources, one leaving as
+  // the other arrives. This one had a single layer and a pair of scissors.
   //
-  // So the outgoing cover is held underneath for the length of the sequence and the edge reveals it
-  // instead. It is one background-image, set here and cleared at the end, and only while a swap is
-  // in flight — the cost is a decoded image that is already in memory.
+  // So the outgoing cover is held underneath for the length of the sequence. One background-image,
+  // set here and cleared at the end, holding an image that is already decoded and in memory.
   if (el.cover.src) el.art.style.backgroundImage = `url("${el.cover.src}")`;
-  // And start the incoming cover decoding now, rather than at the midpoint.
-  //
-  // `paint` writes the words the instant the content changes, but `setCover` only repoints the image
-  // once the new one has decoded — deliberately, so a swap on `src` alone cannot repaint a blank
-  // frame. The two together mean that on a slow fetch the card reads as the new song above the old
-  // artwork. In OBS the cover comes through LiMusic's proxy, so there is always a fetch, and the
-  // outgoing half is 224ms of doing nothing but waiting.
-  //
-  // The request is the same one `setCover` will make a moment later, so a warm cache makes this free
-  // and a cold one has already started by the time it is needed. If it fails, nothing here cares —
-  // `setCover` still handles that, and still falls back to the music note.
-  if (track.thumbnail) { const warm = new Image(); warm.src = coverSrc(track.thumbnail); }
 
   // The outgoing content, cloned so it is really there while the incoming one arrives.
   //
   // This is what makes the roll a roll. The DOM holds one set of content, so a change that reuses it
-  // has to empty the card to write the new values in — which is the relay the roll is meant to stop
-  // being. A copy costs one `cloneNode` on six short elements, and it buys the thing that no amount
-  // of timing could: two sets of content on screen at the same time, which is what the roll is.
+  // has to empty the card to write the new values in — the relay this is meant to stop being. A copy
+  // costs one `cloneNode` on six short elements and buys the thing no amount of timing could: two
+  // sets of content on screen at once, which is what a roll is.
   //
-  // Ids come off the copy. It is a duplicate of a subtree that has them, and two elements with the
-  // same id is the kind of thing that works until the day something asks for one of them.
+  // Ids come off it: it duplicates a subtree that has them, and two elements with the same id is the
+  // kind of thing that works until the day something asks for one of them.
   const ghost = el.stack.cloneNode(true);
   ghost.removeAttribute("id");
   ghost.classList.add("ghost");
   ghost.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
   el.meta.append(ghost);
 
-  paint(track);                             // the new values, in the block that is about to roll in
+  // Start the new cover loading, and let it load *while the old one is leaving*.
+  //
+  // The artwork's entrance is a clip-path on a fixed timeline, and `setCover` only assigns the src
+  // once the new image has decoded — assigning it earlier blanks the image for the length of the
+  // fetch, which is the blank frame that wait exists to avoid. Without waiting, the wipe began over an
+  // image that had not changed and uncovered the pinned background, which held the same cover: the
+  // artwork sat frozen for the whole change and then jumped at the end. That was the bug.
+  //
+  // It is not awaited. Awaiting it would put the midpoint wherever the fetch happened to land — early
+  // for a cached cover, which would swap the content while the old one was still leaving, and late for
+  // a cold one, which would push the change past the 700ms the brief allows. The exit runs its own
+  // length regardless, and the fetch spends that length in parallel; by the time the content changes
+  // the image is decoded and `setCover` finds it in cache. A cover that is slower than the exit is
+  // slower than the change, and the sequence does not wait for it.
+  const wanted = track.thumbnail ? coverSrc(track.thumbnail) : "";
+  if (wanted) { const warm = new Image(); warm.src = wanted; }
+
+  body.classList.add("swap-out");
   void body.offsetWidth;                    // a reflow, or the class change animates from nowhere
   body.classList.add("roll");
-
-  // The artwork keeps its own two halves inside the same window; the roll itself is one phase.
-  body.classList.add("swap-out");
   await wait(T.exit);
+
+  paint(track);                             // the new values, in the block that is about to roll in
   body.classList.remove("swap-out");
   void body.offsetWidth;
   body.classList.add("swap-in");
