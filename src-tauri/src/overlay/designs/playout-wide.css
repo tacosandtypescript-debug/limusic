@@ -39,21 +39,8 @@ body[data-design^="playout"] .controls {
   letter-spacing: 0.06em;
 }
 
-/* ── How the cover changes ────────────────────────────────────────────────────────────────────
-   The cover band is the size of a lower-third, so it changes the way a transmission does: the
-   incoming frame is *revealed by an edge travelling across it*, not pushed in from the side.
-   `clip-path` on the band is what makes that read as a wipe, and the small scale keeps the artwork
-   from looking frozen while it happens.
-
-   Opacity stays at 1 throughout on purpose. A wipe that also fades is two effects doing one job, and
-   the moment it fades it stops reading as a mixer and starts reading as a dissolve. */
-@keyframes playout-art-out {
-  0%   { clip-path: inset(0 0 0 0); transform: scale(1); }
-  100% { clip-path: inset(0 100% 0 0); transform: scale(1.03); }
-}
-
 @keyframes playout-art-in {
-  0%   { clip-path: inset(0 0 0 100%); transform: scale(1.03); }
+  0%   { clip-path: inset(0 100% 0 0); transform: scale(1.03); }
   100% { clip-path: inset(0 0 0 0); transform: scale(1); }
 }
 
@@ -70,12 +57,23 @@ body[data-design^="playout"] .controls {
  *
  * On the image, the band is never clipped. What the edge uncovers is the band's own background, which
  * the script fills with the cover that is leaving. Which is what a wipe is supposed to do. */
-body[data-design^="playout"].swap-out .art img {
-  animation: playout-art-out var(--dur-exit-art) var(--ease-soft) both;
-}
-
-body[data-design^="playout"].swap-in .art img {
-  animation: playout-art-in var(--dur-art) var(--ease-out) both;
+/* One pass, not two, and it is the same motion a mixer makes.
+ *
+ * The outgoing cover is already held as the band's background, so a wipe that removes the image first
+ * uncovers that background — which is the same picture. The first quarter of every change therefore
+ * showed a cover that did not move while the words rolled away: a dead beat at the top of the
+ * transition, and this was the cause of it.
+ *
+ * So the artwork does not leave. The incoming cover is wiped in over the outgoing one, one edge
+ * uncovering the next frame the way a wipe is supposed to, and because there is only one pass it can
+ * take the whole change instead of the 412ms that was left of it. It runs on `roll`, which is the
+ * class the sequence adds for the length of the change, so the artwork and the words share one
+ * timeline and one curve.
+ *
+ * `inset(0 100% 0 0)` clips from the right, leaving the left edge visible first: the new cover is
+ * uncovered in the direction the text reads and the words move. */
+body[data-design^="playout"].roll .art img {
+  animation: playout-art-in var(--dur-swap) var(--ease-arrive) both;
 }
 
 body[data-design^="playout"] .art {
