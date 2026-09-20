@@ -10,13 +10,7 @@
 /* Vinyl — the physical one. The record winds down as the swap begins (the spin loop reads the
    `swapping` state, not a CSS animation), drifts and turns a little as it leaves, and the new one
    arrives slowly and is still gathering speed when the text settles. */
-@keyframes vinyl-art-out { to { opacity: 0; transform: translateX(-9%) rotate(-14deg) scale(0.97); } }
-
-@keyframes vinyl-art-in { from { opacity: 0; transform: translateX(11%) rotate(16deg) scale(0.97); } }
-
-body[data-design^="vinyl"].swap-out .art img { animation: vinyl-art-out var(--dur-exit-art) var(--ease-soft) both; }
-
-body[data-design^="vinyl"].swap-in .art img { animation: vinyl-art-in var(--dur-art) var(--ease-out) both; }
+@keyframes vinyl-art-in { from { opacity: 0; transform: translateX(7%) rotate(9deg) scale(0.97); } }
 
 /* The shape is the load-bearing decision, and it took two attempts to get right.
 
@@ -52,6 +46,24 @@ body:not([data-card="auto"])[data-design^="vinyl"] #now::before {
   border-radius: var(--card-radius);
   backdrop-filter: blur(var(--card-blur)) saturate(1.1);
   opacity: 1;
+}
+
+/* One pass, in step with the words.
+ *
+ * The record used to leave first: `vinyl-art-out` faded the image over the outgoing half, which —
+ * because the outgoing cover is now held as the band's background — uncovered the same cover and
+ * showed nothing at all for 308ms. The same dead beat the playout had, from the same cause.
+ *
+ * It does not leave any more. The incoming cover drifts in over the outgoing one during the second
+ * half of the change, on the same curve and at the same delay as the incoming words, so the artwork
+ * and the title cross at the same instant. Everything the whole sequence has been trying to get right
+ * is in that sentence: one moment, not two, and never a frame with nothing on it.
+ *
+ * The turn is gentler than it was. Sixteen degrees was a twist, and a record being set down turns a
+ * little; nine and seven per cent of drift is the same gesture with the violence taken out. */
+body[data-design^="vinyl"].handover .art img {
+  animation: vinyl-art-in calc(var(--dur-swap) * 0.5) var(--ease-arrive)
+             calc(var(--dur-swap) * 0.5) both;
 }
 
 body[data-design^="vinyl"] .art {

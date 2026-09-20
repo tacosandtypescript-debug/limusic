@@ -573,9 +573,6 @@ body:not(.paused) .controls .glyph-pause { opacity: 1; scale: 1; }
    Nothing here animates layout: transforms and opacity only, so a track change never makes OBS
    re-lay-out the page.
    ═══════════════════════════════════════════════════════════════════════════════════════════════ */
-@keyframes text-out { to { opacity: 0; transform: translateY(-6px); } }
-@keyframes text-in  { from { opacity: 0; transform: translateY(9px); } }
-
 /* The words no longer have exits and entrances of their own.
  *
  * They had a stagger each way, a fade, and a small drift, all tuned over several rounds to close the

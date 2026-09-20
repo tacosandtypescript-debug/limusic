@@ -613,6 +613,61 @@ fn a_track_change_is_sequenced() {
 }
 
 
+/// A `@keyframes` nothing animates is a lie about what the overlay does.
+///
+/// Three accumulated while the track change was being reworked — `text-in` and `text-out`, left behind
+/// when the words lost their own exits and entrances, and `vinyl-art-out`, orphaned when the artwork
+/// stopped leaving first. Each read as a described behaviour in a file somebody would reason from
+/// later, and nothing was checking.
+///
+/// Read from `code()`, which has the comments stripped: a keyframe named only in prose is not a
+/// keyframe anything uses, and this file is full of prose that names them.
+#[test]
+fn every_keyframe_is_referenced() {
+    let src = code();
+    let word = |s: &str| -> String {
+        s.chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect()
+    };
+
+    let mut defined: Vec<String> = Vec::new();
+    let mut from = 0;
+    while let Some(at) = src[from..].find("@keyframes ") {
+        let start = from + at + "@keyframes ".len();
+        defined.push(word(&src[start..]));
+        from = start;
+    }
+    assert!(
+        defined.len() > 15,
+        "found {} keyframes, which is fewer than the page has",
+        defined.len()
+    );
+
+    let mut animated: Vec<String> = Vec::new();
+    let mut from = 0;
+    while let Some(at) = src[from..].find("animation:") {
+        let start = from + at + "animation:".len();
+        let rest = src[start..].trim_start();
+        let name = word(rest);
+        if !name.is_empty() {
+            animated.push(name);
+        }
+        from = start;
+    }
+    assert!(!animated.is_empty(), "no animation declarations at all");
+
+    let dead: Vec<String> = defined
+        .into_iter()
+        .filter(|k| !animated.iter().any(|a| a == k))
+        .collect();
+    assert!(
+        dead.is_empty(),
+        "these keyframes are never animated by anything: {}",
+        dead.join(", ")
+    );
+}
+
 /// The two transport arrows have to point opposite ways.
 ///
 /// They did not, for several rounds. `next` was `M5.5 12l9 7V5z`: move to (5.5,12), line to
