@@ -354,34 +354,37 @@ body.paused .art img { filter: saturate(0.4) brightness(0.84); }
    it lands where the content is, and out of the flow so it does not push it. */
 .meta > .ghost { position: absolute; inset: 0; pointer-events: none; }
 
-/* In place, and never empty.
+/* In place, with a short drift, and a clean handover.
  *
- * This was a roll: the outgoing block travelled its own height upwards and the incoming one followed
- * from below. The reasoning was that a queue advancing is a thing that moves in one direction, and
- * that a roll cannot leave the card blank because two blocks are always on screen.
+ * This has been three things. It was a relay — everything left, the content was swapped while the
+ * card was empty, everything came back — and the hole in the middle of it was what several rounds of
+ * tuning went into closing. Then it was a roll, which has no hole because two blocks are always on
+ * screen, and which put the outgoing track's artist and album in the seat of the title for most of
+ * the change. Then it was a cross-fade of the same two blocks in the same place, which has no hole
+ * and moves nothing into anything else's seat, and smears: two different titles at half opacity on
+ * top of each other are not a blend, they are two titles nobody can read.
  *
- * Both of those are true and the result was still wrong, because the rows are not interchangeable.
- * A departure board rolls because every row on it is the same kind of thing. Here a title, an artist
- * and an album are three different kinds of thing, and rolling them moves each into the seat of the
- * one above: on the way through, the title's own place is filled by the outgoing track's artist and
- * album. Seen on screen that is not a transition, it is a moment of nonsense in the middle of every
- * change — and the title is the one thing on the card that must never read wrong.
+ * The mistake was treating the hole as something to cover. The hole was a *timing* fault — the exits
+ * finished before the content changed — and the fix for a timing fault is to fix the timing, not to
+ * find a transition that cannot have one. So: the block fades out over the first half of the change
+ * and drifts up seven pixels doing it, the new one fades in over the second half arriving from nine
+ * pixels below, and the two meet at the midpoint with nothing shared and nothing missing.
  *
- * So nothing moves. Both copies stay where they belong and cross over, the outgoing leading and the
- * incoming overlapping it by a fifth. The overlap is what keeps the card from emptying: there is no
- * frame with neither on it, which is the property the roll was built for and this keeps.
+ * The drift is the whole difference between this and a plain dissolve. Both halves move the same way
+ * — up — so the change reads as one movement carrying the old out and the new in, where a dissolve
+ * only reads as the card changing its mind. Small on purpose: seven and nine pixels at this weight
+ * is motion you notice without being able to point at.
  *
- * The delays are what make it a handover rather than a dissolve. Both running the full length at once
- * would put two different titles in the same place at half opacity each for most of the change, which
- * on text this size is a smear. */
-@keyframes hand-out { to   { opacity: 0; } }
-@keyframes hand-in  { from { opacity: 0; } }
+ * No stagger. There was one, and it existed to draw out a departure that no longer needs drawing
+ * out; the rows are one block, and one block leaves together. */
+@keyframes hand-out { to   { opacity: 0; transform: translateY(-7px); } }
+@keyframes hand-in  { from { opacity: 0; transform: translateY(9px);  } }
 body.handover .meta > .ghost {
-  animation: hand-out calc(var(--dur-swap) * 0.55) var(--ease-soft) both;
+  animation: hand-out calc(var(--dur-swap) * 0.5) var(--ease-arrive) both;
 }
 body.handover .stack:not(.ghost) {
-  animation: hand-in calc(var(--dur-swap) * 0.55) var(--ease-arrive)
-             calc(var(--dur-swap) * 0.45) both;
+  animation: hand-in calc(var(--dur-swap) * 0.5) var(--ease-arrive)
+             calc(var(--dur-swap) * 0.5) both;
 }
 
 .eyebrow {

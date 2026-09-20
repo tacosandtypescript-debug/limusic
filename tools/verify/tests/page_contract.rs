@@ -730,36 +730,45 @@ fn a_track_change_adds_up() {
     // The handover is two animations inside one change, and together they must span it: the outgoing
     // copy leads, the incoming overlaps it, and neither may run past the change the sequence waits
     // for. Each is a fraction of `--dur-swap`, so the sum of their fractions is what has to add up.
-    let factor = |token: &str| -> f64 {
-        src.split_once(token)
-            .and_then(|(_, rest)| rest.split_once('*'))
-            .map(|(_, v)| v.trim())
-            .and_then(|v| v.split(')').next())
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(0.0)
+    // Read out of the two rules rather than pattern-matched, because `hand-in` carries two fractions —
+    // its length and its delay — and any lookup that keys off one of them reads the other by accident.
+    let fractions = |sel: &str| -> Vec<f64> {
+        let at = src.find(sel).expect("the handover rule must exist");
+        let body = &src[at..at + src[at..].find('}').expect("unclosed rule")];
+        let mut out = Vec::new();
+        let mut rest = body;
+        while let Some((_, after)) = rest.split_once("var(--dur-swap) * ") {
+            let digits: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if let Ok(v) = digits.parse::<f64>() {
+                out.push(v);
+            }
+            rest = after;
+        }
+        out
     };
-    let out_len = factor("animation: hand-out calc(var(--dur-swap) *");
-    let in_delay = factor("calc(var(--dur-swap) * 0.45) both")
-        .max(factor("var(--ease-arrive)
-             calc(var(--dur-swap) *"));
-    let in_len = factor("animation: hand-in calc(var(--dur-swap) *");
+    let out_half = fractions("body.handover .meta > .ghost");
+    let in_half = fractions("body.handover .stack:not(.ghost)");
+    assert_eq!(out_half.len(), 1, "the outgoing copy is one duration and no delay");
+    assert_eq!(in_half.len(), 2, "the incoming copy is a duration and a delay");
+    let (out_len, in_len, in_delay) = (out_half[0], in_half[0], in_half[1]);
+
+    // Adjacent, not overlapping and not gapped. They shared a tenth of the change for a while — built
+    // that way on purpose, to be sure the card was never empty — and on text this size an overlap is a
+    // smear: two different titles at half opacity in the same place are not a blend, they are two
+    // titles nobody can read. A gap is the empty card this whole sequence exists to avoid. They meet.
     assert!(
-        out_len > 0.0 && in_len > 0.0,
-        "the handover must be driven by --dur-swap, not by a fixed duration"
-    );
-    // They have to overlap, or there is a frame with neither copy on it — the empty card the roll was
-    // built to remove and this keeps.
-    assert!(
-        out_len > in_delay,
-        "the outgoing copy finishes at {out_len:.2} and the incoming starts at {in_delay:.2}: \
-         nothing on screen in between"
+        (out_len - in_delay).abs() < 0.02,
+        "the outgoing copy finishes at {out_delay:.2} and the incoming starts at {in_delay:.2}",
+        out_delay = out_len
     );
     assert!(
         in_delay + in_len <= 1.005,
         "the handover ends at {:.2} of the change, past where the sequence stops waiting",
         in_delay + in_len
     );
-
     for (family, share) in &shares {
         let exit = swap * share;
         let enter = swap * (1.0 - share);

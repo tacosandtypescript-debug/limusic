@@ -72,8 +72,9 @@ body[data-design^="playout"] .controls {
  *
  * `inset(0 100% 0 0)` clips from the right, leaving the left edge visible first: the new cover is
  * uncovered in the direction the text reads and the words move. */
-body[data-design^="playout"].roll .art img {
-  animation: playout-art-in var(--dur-swap) var(--ease-arrive) both;
+body[data-design^="playout"].handover .art img {
+  animation: playout-art-in calc(var(--dur-swap) * 0.5) var(--ease-arrive)
+             calc(var(--dur-swap) * 0.5) both;
 }
 
 body[data-design^="playout"] .art {
