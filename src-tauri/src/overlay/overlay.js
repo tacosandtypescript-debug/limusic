@@ -637,7 +637,7 @@ async function swapTo(track) {
 
   body.classList.add("swap-out");
   void body.offsetWidth;                    // a reflow, or the class change animates from nowhere
-  body.classList.add("roll");
+  body.classList.add("handover");
   await wait(T.exit);
 
   paint(track);                             // the new values, in the block that is about to roll in
@@ -646,7 +646,7 @@ async function swapTo(track) {
   body.classList.add("swap-in");
 
   await wait(T.swap - T.exit);
-  body.classList.remove("roll", "swap-in");
+  body.classList.remove("handover", "swap-in");
   ghost.remove();
   // The new cover is the one on screen now; the old one is only in the way of the next wipe.
   el.art.style.backgroundImage = "";

@@ -354,15 +354,35 @@ body.paused .art img { filter: saturate(0.4) brightness(0.84); }
    it lands where the content is, and out of the flow so it does not push it. */
 .meta > .ghost { position: absolute; inset: 0; pointer-events: none; }
 
-/* One direction, both halves, no fade.
+/* In place, and never empty.
  *
- * The outgoing copy is clipped away at the top as it goes and the incoming one follows from below.
- * A fade would be a second way of saying the same thing, and it is what made the old transition read
- * as a swap rather than a roll — the content dimmed and brightened instead of moving. */
-@keyframes roll-out { to   { transform: translateY(-100%); } }
-@keyframes roll-in  { from { transform: translateY(100%); } }
-body.roll .stack:not(.ghost)     { animation: roll-in  var(--dur-swap) var(--ease-arrive) both; }
-body.roll .meta > .ghost         { animation: roll-out var(--dur-swap) var(--ease-arrive) both; }
+ * This was a roll: the outgoing block travelled its own height upwards and the incoming one followed
+ * from below. The reasoning was that a queue advancing is a thing that moves in one direction, and
+ * that a roll cannot leave the card blank because two blocks are always on screen.
+ *
+ * Both of those are true and the result was still wrong, because the rows are not interchangeable.
+ * A departure board rolls because every row on it is the same kind of thing. Here a title, an artist
+ * and an album are three different kinds of thing, and rolling them moves each into the seat of the
+ * one above: on the way through, the title's own place is filled by the outgoing track's artist and
+ * album. Seen on screen that is not a transition, it is a moment of nonsense in the middle of every
+ * change — and the title is the one thing on the card that must never read wrong.
+ *
+ * So nothing moves. Both copies stay where they belong and cross over, the outgoing leading and the
+ * incoming overlapping it by a fifth. The overlap is what keeps the card from emptying: there is no
+ * frame with neither on it, which is the property the roll was built for and this keeps.
+ *
+ * The delays are what make it a handover rather than a dissolve. Both running the full length at once
+ * would put two different titles in the same place at half opacity each for most of the change, which
+ * on text this size is a smear. */
+@keyframes hand-out { to   { opacity: 0; } }
+@keyframes hand-in  { from { opacity: 0; } }
+body.handover .meta > .ghost {
+  animation: hand-out calc(var(--dur-swap) * 0.55) var(--ease-soft) both;
+}
+body.handover .stack:not(.ghost) {
+  animation: hand-in calc(var(--dur-swap) * 0.55) var(--ease-arrive)
+             calc(var(--dur-swap) * 0.45) both;
+}
 
 .eyebrow {
   display: flex; align-items: center; gap: 8px;

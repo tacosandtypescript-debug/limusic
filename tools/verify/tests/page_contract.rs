@@ -598,16 +598,16 @@ fn a_track_change_is_sequenced() {
 
     // One phase, not two: both halves of the roll run together over the same window.
     assert!(
-        src.contains(r#"body.classList.add("roll")"#),
-        "the roll needs its own class, or it runs on the artwork's two halves and there is a join"
+        src.contains(r#"body.classList.add("handover")"#),
+        "the handover needs its own class, or it runs on the artwork's two halves and there is a join"
     );
     assert!(
         src.contains("await wait(T.swap - T.exit)"),
-        "the roll must last the whole change, not the incoming half of it"
+        "the handover must span the whole change, not the incoming half of it"
     );
     // The artwork still runs its two halves inside that window, which is what the reflow is for.
     assert!(src.contains("void body.offsetWidth;"));
-    assert!(src.contains(r#"body.classList.remove("roll", "swap-in")"#), "both classes come off");
+    assert!(src.contains(r#"body.classList.remove("handover", "swap-in")"#), "both classes come off");
     // The entrance plays once, on the first paint, and never again.
     assert!(src.contains("if (!booted)"), "the entrance must be one-shot");
 }
@@ -727,22 +727,46 @@ fn a_track_change_adds_up() {
         );
     }
 
-    // The roll is one animation covering the whole change, and the artwork's two halves have to fit
-    // inside it — the artwork is the only thing still running a relay, and its exit and its entrance
-    // both have to land before the roll does, or it is still moving when the next one starts.
-    let roll = src
-        .split_once("animation: roll-in  var(--dur-swap)")
-        .or_else(|| src.split_once("animation: roll-in var(--dur-swap)"))
-        .map(|_| swap)
-        .unwrap_or(0.0);
-    assert!(roll > 0.0, "the roll must be driven by --dur-swap");
+    // The handover is two animations inside one change, and together they must span it: the outgoing
+    // copy leads, the incoming overlaps it, and neither may run past the change the sequence waits
+    // for. Each is a fraction of `--dur-swap`, so the sum of their fractions is what has to add up.
+    let factor = |token: &str| -> f64 {
+        src.split_once(token)
+            .and_then(|(_, rest)| rest.split_once('*'))
+            .map(|(_, v)| v.trim())
+            .and_then(|v| v.split(')').next())
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0.0)
+    };
+    let out_len = factor("animation: hand-out calc(var(--dur-swap) *");
+    let in_delay = factor("calc(var(--dur-swap) * 0.45) both")
+        .max(factor("var(--ease-arrive)
+             calc(var(--dur-swap) *"));
+    let in_len = factor("animation: hand-in calc(var(--dur-swap) *");
+    assert!(
+        out_len > 0.0 && in_len > 0.0,
+        "the handover must be driven by --dur-swap, not by a fixed duration"
+    );
+    // They have to overlap, or there is a frame with neither copy on it — the empty card the roll was
+    // built to remove and this keeps.
+    assert!(
+        out_len > in_delay,
+        "the outgoing copy finishes at {out_len:.2} and the incoming starts at {in_delay:.2}: \
+         nothing on screen in between"
+    );
+    assert!(
+        in_delay + in_len <= 1.005,
+        "the handover ends at {:.2} of the change, past where the sequence stops waiting",
+        in_delay + in_len
+    );
 
     for (family, share) in &shares {
         let exit = swap * share;
         let enter = swap * (1.0 - share);
+        let handover = swap;
         assert!(
-            exit + enter <= roll + 0.5,
-            "{family}: the artwork's halves ({:.0}ms) outlast the roll ({roll:.0}ms)",
+            exit + enter <= handover + 0.5,
+            "{family}: the artwork's halves ({:.0}ms) outlast the change ({handover:.0}ms)",
             exit + enter
         );
 
